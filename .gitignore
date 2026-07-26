@@ -1,0 +1,13 @@
+.env
+.venv/
+.idea/
+chroma_db/
+faiss_index/
+outputs/
+output_result.json
+data/resumes/*
+data/jds/*
+!data/resumes/.gitkeep
+!data/jds/.gitkeep
+__pycache__/
+*.pyc
