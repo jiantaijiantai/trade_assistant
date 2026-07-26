@@ -1,3 +1,3 @@
 # trade_assistant
 
-AI business assistant project placeholder.
+Multi-agent AI business assistant project.
