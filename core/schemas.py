@@ -1,0 +1,81 @@
+"""
+阶段 4 生产骨架：统一数据结构。
+
+生产版第一步不是急着接真实 LLM / 数据库 / 工具，
+而是先把系统边界定义清楚：
+- 谁发起请求；
+- 属于哪个租户；
+- 有什么权限；
+- 路由到了哪个 Agent；
+- 成本预算是多少；
+- 工具调用是否具备幂等键；
+- 失败时能不能追踪。
+"""
+
+from enum import Enum
+from typing import Any
+
+from pydantic import BaseModel, Field
+
+
+class TaskType(str, Enum):
+    KNOWLEDGE = "knowledge"
+    DATA = "data"
+    TOOL = "tool"
+    REPORT = "report"
+
+
+class RiskLevel(str, Enum):
+    READONLY = "readonly"
+    LOW_RISK_WRITE = "low_risk_write"
+    HIGH_RISK_WRITE = "high_risk_write"
+
+
+class RequestContext(BaseModel):
+    request_id: str
+    tenant_id: str
+    user_id: str
+    roles: list[str] = Field(default_factory=list)
+    user_input: str
+    max_cost_units: int = 10
+
+
+class RouteDecision(BaseModel):
+    task_type: TaskType
+    confidence: float = Field(ge=0, le=1)
+    reason: str
+
+
+class AgentOutput(BaseModel):
+    agent_name: str
+    task_type: TaskType
+    answer: str
+    evidence: list[str] = Field(default_factory=list)
+    next_steps: list[str] = Field(default_factory=list)
+    cost_units: int = 1
+
+
+class ToolSpec(BaseModel):
+    name: str
+    description: str
+    risk_level: RiskLevel
+    required_roles: list[str] = Field(default_factory=list)
+    idempotent: bool = True
+
+
+class ToolCallPlan(BaseModel):
+    tool_name: str
+    arguments: dict[str, Any] = Field(default_factory=dict)
+    idempotency_key: str | None = None
+
+
+class AuditEvent(BaseModel):
+    request_id: str
+    event_type: str
+    message: str
+    data: dict[str, Any] = Field(default_factory=dict)
+
+
+class PolicyDecision(BaseModel):
+    allowed: bool
+    reason: str
