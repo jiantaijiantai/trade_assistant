@@ -1,4 +1,6 @@
 .env
+.env.*
+!.env.example
 .venv/
 .idea/
 chroma_db/
@@ -9,5 +11,7 @@ data/resumes/*
 data/jds/*
 !data/resumes/.gitkeep
 !data/jds/.gitkeep
+业务资料/
 __pycache__/
 *.pyc
+.pytest_cache/
