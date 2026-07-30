@@ -1,16 +1,12 @@
-"""
-阶段 4 生产骨架：工具注册表。
+\
+\
+\
+\
+\
+\
+\
+\
 
-生产版不能让 Agent 随便调用任何函数。
-每个工具都要先注册，并声明：
-- 工具名；
-- 风险等级；
-- 是否幂等；
-- 需要什么角色；
-- 适合什么场景。
-
-当前只注册模拟工具，不执行真实外部动作。
-"""
 
 from core.schemas import RiskLevel, ToolSpec
 
@@ -18,31 +14,40 @@ from core.schemas import RiskLevel, ToolSpec
 TOOLS = {
     "create_followup_task": ToolSpec(
         name="create_followup_task",
-        description="创建客户跟进任务",
+        description="创建本地业务跟进待办，记录后续需要业务员人工处理的事项",
         risk_level=RiskLevel.LOW_RISK_WRITE,
         required_roles=["operator"],
         idempotent=True,
     ),
-    "send_external_message": ToolSpec(
-        name="send_external_message",
-        description="发送外部消息",
-        risk_level=RiskLevel.HIGH_RISK_WRITE,
-        required_roles=["manager"],
-        idempotent=False,
+    "generate_business_checklist": ToolSpec(
+        name="generate_business_checklist",
+        description="生成客户准入、合同、货转、结算单、开票申请检查清单",
+        risk_level=RiskLevel.LOW_RISK_WRITE,
+        required_roles=["operator"],
+        idempotent=True,
     ),
-    "query_sales_metrics": ToolSpec(
-        name="query_sales_metrics",
-        description="查询销售指标",
-        risk_level=RiskLevel.READONLY,
-        required_roles=["analyst"],
+    "draft_business_document": ToolSpec(
+        name="draft_business_document",
+        description="生成合同出具、货转出具、结算单出具、开票申请等内部文字草稿",
+        risk_level=RiskLevel.LOW_RISK_WRITE,
+        required_roles=["operator"],
+        idempotent=True,
+    ),
+    "draft_business_report": ToolSpec(
+        name="draft_business_report",
+        description="生成内部业务说明、异常说明、交接说明或复盘报告草稿",
+        risk_level=RiskLevel.LOW_RISK_WRITE,
+        required_roles=["operator"],
         idempotent=True,
     ),
 }
 
 
 def get_tool(name: str) -> ToolSpec | None:
+
     return TOOLS.get(name)
 
 
 def list_tools() -> list[ToolSpec]:
+
     return list(TOOLS.values())

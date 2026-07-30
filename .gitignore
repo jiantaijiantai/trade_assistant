@@ -3,6 +3,13 @@
 !.env.example
 .venv/
 .idea/
+node_modules/
+dist/
+*.tsbuildinfo
+*.log
+frontend/node_modules/
+frontend/dist/
+frontend/*.log
 chroma_db/
 faiss_index/
 outputs/
@@ -15,3 +22,5 @@ data/jds/*
 __pycache__/
 *.pyc
 .pytest_cache/
+.mypy_cache/
+.ruff_cache/

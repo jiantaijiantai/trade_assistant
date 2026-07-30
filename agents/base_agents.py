@@ -1,58 +1,60 @@
-"""
-阶段 4：多 Agent 学习版。
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
 
-这个文件先把所有 Agent 放在一起，方便完整闭环。
-后续生产版可以再拆成：
-- supervisor.py
-- knowledge_agent.py
-- data_agent.py
-- tool_agent.py
-- report_agent.py
 
-核心思想：
-Supervisor 不直接回答问题，而是判断任务应该交给哪个 Agent。
-每个 Agent 只负责一种类型的任务，最后由图流程统一汇总结果。
-"""
-
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
 from config import DEFAULT_ROUTE, ROUTE_KEYWORDS
+from rag.answerer import answer_with_rag
 
 
 TaskType = Literal["knowledge", "data", "tool", "report"]
 
 
 class RouteDecision(BaseModel):
-    """Supervisor 的路由决策结果。"""
+
 
     task_type: TaskType = Field(description="被路由到的 Agent 类型")
     reason: str = Field(description="为什么这样路由")
 
 
 class AgentOutput(BaseModel):
-    """每个 Agent 的统一输出格式。"""
+
 
     agent_name: str
     task_type: TaskType
     answer: str
     evidence: list[str] = Field(default_factory=list)
+    sources: list[dict[str, Any]] = Field(default_factory=list)
     next_steps: list[str] = Field(default_factory=list)
 
 
 class Supervisor:
-    """
-    Supervisor 负责意图识别和任务路由。
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
 
-    版使用关键词规则，优点：
-    1. 不需要 API Key；
-    2. 结果稳定，方便验证；
-    3. 你能清楚看到路由规则如何影响 Agent 选择。
-
-    生产版可以替换成 LLM 分类器：
-    用户输入 -> LLM 输出结构化 RouteDecision -> LangGraph 路由。
-    """
 
     def route(self, user_input: str) -> RouteDecision:
         text = user_input.strip()
@@ -72,31 +74,47 @@ class Supervisor:
 
 
 class KnowledgeAgent:
-    """知识问答 Agent：负责业务知识、规则、流程解释。"""
+
 
     name = "KnowledgeAgent"
 
     def run(self, user_input: str) -> AgentOutput:
+\
+\
+\
+\
+\
+\
+\
+\
+\
+\
+
+
+        rag_answer = answer_with_rag(
+            query=user_input,
+            top_k=5,
+            candidate_k=20,
+        )
+
         return AgentOutput(
             agent_name=self.name,
             task_type="knowledge",
-            answer=(
-                "这是知识问答类任务。当前学习版会返回模拟知识答案；"
-                "生产版应接入 RAG 检索，从业务知识库中召回依据后再回答。"
-            ),
+            answer=rag_answer.answer,
             evidence=[
-                "可接入制度文档、FAQ、SOP、业务知识库",
-                "适合回答：规则是什么、流程怎么走、概念如何理解",
+                f"{source.file_name} | chunk_id={source.chunk_id} | score={source.score:.4f}"
+                for source in rag_answer.sources
             ],
+            sources=[source_to_api_dict(source) for source in rag_answer.sources],
             next_steps=[
-                "阶段 5 可把这里替换成 Hybrid Search + Rerank",
-                "增加引用来源，避免无依据回答",
+                "核对来源片段后再用于真实业务判断",
+                "如召回不准确，可调整 chunk_size、overlap、top_k 或补充资料",
             ],
         )
 
 
 class DataAgent:
-    """数据分析 Agent：负责统计、趋势、指标解释。"""
+
 
     name = "DataAgent"
 
@@ -120,7 +138,7 @@ class DataAgent:
 
 
 class ToolAgent:
-    """工具执行 Agent：负责调用外部工具或执行业务流程。"""
+
 
     name = "ToolAgent"
 
@@ -129,23 +147,23 @@ class ToolAgent:
             agent_name=self.name,
             task_type="tool",
             answer=(
-                "这是工具执行类任务。当前学习版不会真实执行外部动作；"
-                "生产版必须增加权限校验、参数校验、审计日志和失败回滚。"
+                "这是团队内部业务文字辅助任务。系统会根据业务员输入生成本地待办、"
+                "检查清单或文字草稿，帮助整理客户准入、合同、货转、结算单、开票申请等日常材料。"
             ),
             evidence=[
-                "适合处理：发送通知、创建任务、更新状态、触发流程",
-                "高风险操作不能只靠 Agent 自己决定",
+                "适合处理：客户准入资料核对、合同字段整理、货转字段核对、结算单字段整理、开票申请资料整理",
+                "工具只生成本地文件，供业务员人工复核和继续处理",
             ],
             next_steps=[
                 "为每个工具定义输入输出 schema",
-                "区分只读工具和写入工具",
-                "重要操作增加人工确认",
+                "根据真实业务材料持续补充字段模板",
+                "把生成结果用于本地演示、截图和业务交接说明",
             ],
         )
 
 
 class ReportAgent:
-    """报告生成 Agent：负责周报、复盘、分析报告。"""
+
 
     name = "ReportAgent"
 
@@ -167,3 +185,24 @@ class ReportAgent:
                 "输出 Markdown / DOCX / PDF",
             ],
         )
+
+
+def source_to_api_dict(source) -> dict[str, Any]:
+\
+\
+\
+\
+\
+
+
+    return {
+        "chunk_id": source.chunk_id,
+        "file_name": source.file_name,
+        "file_type": source.file_type,
+        "source_path": source.source_path,
+        "chunk_index": source.chunk_index,
+        "score": source.score,
+        "text": source.text,
+        "metadata": source.metadata,
+        "warnings": source.warnings,
+    }
