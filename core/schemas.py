@@ -36,6 +36,9 @@ class RequestContext(BaseModel):
     tenant_id: str
     user_id: str
     roles: list[str] = Field(default_factory=list)
+    department_ids: list[str] = Field(default_factory=lambda: ["business"])
+    groups: list[str] = Field(default_factory=list)
+    clearance_level: str = "internal"
     user_input: str
     max_cost_units: int = 10
 

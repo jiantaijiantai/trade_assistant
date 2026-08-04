@@ -17,11 +17,12 @@ from typing import Any
 
 import chromadb
 
+from rag.access_control import BUSINESS_COLLECTION_NAME
 from rag.schemas import DocumentChunk, MetadataValue, SearchHit
 
 
 DEFAULT_CHROMA_DIR = "outputs/rag/chroma"
-DEFAULT_COLLECTION_NAME = "trade_business_docs"
+DEFAULT_COLLECTION_NAME = BUSINESS_COLLECTION_NAME
 
 
 def get_chroma_collection(
@@ -186,6 +187,7 @@ def query_vectors(
     top_k: int = 20,
     persist_dir: str = DEFAULT_CHROMA_DIR,
     collection_name: str = DEFAULT_COLLECTION_NAME,
+    where: dict[str, Any] | None = None,
 ) -> list[SearchHit]:
 \
 \
@@ -199,10 +201,14 @@ def query_vectors(
         collection_name=collection_name,
     )
 
-    results = collection.query(
-        query_embeddings=[query_embedding],
-        n_results=top_k,
-        include=["documents", "metadatas", "distances"],
-    )
+    query_args: dict[str, Any] = {
+        "query_embeddings": [query_embedding],
+        "n_results": top_k,
+        "include": ["documents", "metadatas", "distances"],
+    }
+    if where is not None:
+        query_args["where"] = where
+
+    results = collection.query(**query_args)
 
     return chroma_results_to_hits(results)

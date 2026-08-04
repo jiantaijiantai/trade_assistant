@@ -42,8 +42,10 @@ function App() {
     try {
       const response = await runTradeChat({
         user_input: `${taskPreset}：${question}`,
-        tenant_id: "tenant_demo",
+        tenant_id: "company_internal",
         user_id: "business_user",
+        department_ids: ["business"],
+        clearance_level: "internal",
         max_cost_units: 10
       });
       setResult(response);

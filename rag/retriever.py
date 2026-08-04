@@ -17,6 +17,8 @@
 
 from dataclasses import dataclass
 
+from core.schemas import RequestContext
+from rag.access_control import BUSINESS_COLLECTION_NAME, build_vector_where, filter_authorized_hits
 from rag.chroma_store import query_vectors
 from rag.embeddings import embed_texts, load_embedding_config
 from rag.lexical_index import search_lexical
@@ -32,7 +34,7 @@ class HybridSearchConfig:
     vector_weight: float = 0.65
     lexical_weight: float = 0.35
     chroma_dir: str = "outputs/rag/chroma"
-    collection_name: str = "trade_business_docs_api"
+    collection_name: str = BUSINESS_COLLECTION_NAME
     lexical_index_path: str = "outputs/rag/business_lexical_index.json"
     allow_lexical_fallback: bool = True
 
@@ -81,6 +83,7 @@ def lexical_only_search(
     query: str,
     config: HybridSearchConfig,
     warning: str,
+    access_context: RequestContext | None = None,
 ) -> list[SearchHit]:
 \
 \
@@ -97,6 +100,7 @@ def lexical_only_search(
         query=query,
         top_k=config.top_k,
         index_path=config.lexical_index_path,
+        access_context=access_context,
     )
 
     for hit in hits:
@@ -111,6 +115,7 @@ def lexical_only_search(
 def hybrid_search(
     query: str,
     config: HybridSearchConfig | None = None,
+    access_context: RequestContext | None = None,
 ) -> list[SearchHit]:
 \
 \
@@ -128,6 +133,7 @@ def hybrid_search(
         query=query,
         top_k=config.candidate_k,
         index_path=config.lexical_index_path,
+        access_context=access_context,
     )
 
     try:
@@ -139,7 +145,10 @@ def hybrid_search(
             top_k=config.candidate_k,
             persist_dir=config.chroma_dir,
             collection_name=config.collection_name,
+            where=build_vector_where(access_context) if access_context is not None else None,
         )
+        if access_context is not None:
+            vector_hits = filter_authorized_hits(vector_hits, access_context)
 
     except Exception as exc:
         if not config.allow_lexical_fallback:
@@ -149,6 +158,7 @@ def hybrid_search(
             query=query,
             config=config,
             warning=f"向量召回失败，已降级为 BM25-only：{exc}",
+            access_context=access_context,
         )
 
     merged_hits = merge_hybrid_hits(

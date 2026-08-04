@@ -39,6 +39,12 @@ from docx import Document as DocxDocument
 from openpyxl import load_workbook
 from PIL import Image
 
+from rag.access_control import (
+    BUSINESS_COLLECTION_NAME,
+    BUSINESS_DEPARTMENT_ID,
+    DEFAULT_TENANT_ID,
+    build_default_acl_metadata,
+)
 from rag.chroma_store import (
     DEFAULT_CHROMA_DIR,
     DEFAULT_COLLECTION_NAME,
@@ -509,7 +515,12 @@ def build_index(args: argparse.Namespace) -> dict[str, int]:
             continue
 
         if existing and existing.file_hash != file_hash:
-            remove_old_file_chunks(existing)
+            remove_old_file_chunks(
+                existing,
+                chroma_dir=args.chroma_dir,
+                collection_name=args.collection_name,
+                lexical_index_path=args.lexical_index,
+            )
             stats["changed_files"] += 1
 
         try:
@@ -518,6 +529,18 @@ def build_index(args: argparse.Namespace) -> dict[str, int]:
                 tesseract_cmd=args.tesseract_cmd,
                 tessdata_dir=args.tessdata_dir,
                 ocr_lang=args.ocr_lang,
+            )
+            document.metadata.update(
+                build_default_acl_metadata(
+                    tenant_id=getattr(args, "tenant_id", DEFAULT_TENANT_ID),
+                    department_id=getattr(args, "department_id", BUSINESS_DEPARTMENT_ID),
+                    owner_user_id=getattr(args, "owner_user_id", ""),
+                    visibility=getattr(args, "visibility", "department"),
+                    allowed_user_ids=getattr(args, "allowed_user_ids", ""),
+                    allowed_roles=getattr(args, "allowed_roles", ""),
+                    allowed_groups=getattr(args, "allowed_groups", ""),
+                    sensitivity_level=getattr(args, "sensitivity_level", "internal"),
+                )
             )
             index_document(
                 document=document,
@@ -566,7 +589,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--collection-name",
-        default=DEFAULT_COLLECTION_NAME,
+        default=BUSINESS_COLLECTION_NAME,
         help="Chroma collection 名称",
     )
     parser.add_argument(
@@ -577,6 +600,24 @@ def parse_args() -> argparse.Namespace:
 
     parser.add_argument("--chunk-size", type=int, default=800, help="chunk 最大字符数")
     parser.add_argument("--overlap", type=int, default=120, help="相邻 chunk 重叠字符数")
+    parser.add_argument("--tenant-id", default=DEFAULT_TENANT_ID, help="RAG 租户 ID")
+    parser.add_argument("--department-id", default=BUSINESS_DEPARTMENT_ID, help="RAG 部门 collection key")
+    parser.add_argument("--owner-user-id", default="", help="资料上传人/所有人 ID，仅用于审计")
+    parser.add_argument(
+        "--visibility",
+        default="department",
+        choices=["department", "group", "role", "users"],
+        help="资料可见范围",
+    )
+    parser.add_argument("--allowed-user-ids", default="", help="逗号分隔的员工白名单")
+    parser.add_argument("--allowed-roles", default="", help="逗号分隔的角色白名单")
+    parser.add_argument("--allowed-groups", default="", help="逗号分隔的权限组白名单")
+    parser.add_argument(
+        "--sensitivity-level",
+        default="internal",
+        choices=["internal", "confidential", "restricted"],
+        help="资料密级",
+    )
     parser.add_argument(
         "--tesseract-cmd",
         default=r"C:\Program Files\Tesseract-OCR\tesseract.exe",

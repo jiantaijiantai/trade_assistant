@@ -14,6 +14,7 @@ from __future__ import annotations
 from typing import Any
 
 from graph.production_graph import run_production_multi_agent
+from rag.access_control import BUSINESS_DEPARTMENT_ID, DEFAULT_TENANT_ID
 from loops.llm_loop import llm_critique, llm_finalize, llm_plan
 from loops.schemas import LoopStep, TradeTaskLoopResult
 
@@ -21,9 +22,12 @@ from loops.schemas import LoopStep, TradeTaskLoopResult
 def run_trade_task_loop(
     goal: str,
     user_input: str,
-    tenant_id: str = "tenant_demo",
+    tenant_id: str = DEFAULT_TENANT_ID,
     user_id: str = "user_demo",
     roles: list[str] | None = None,
+    department_ids: list[str] | None = None,
+    groups: list[str] | None = None,
+    clearance_level: str = "internal",
     max_cost_units: int = 10,
 ) -> TradeTaskLoopResult:
 
@@ -42,6 +46,9 @@ def run_trade_task_loop(
             "tenant_id": tenant_id,
             "user_id": user_id,
             "roles": roles or ["operator", "analyst"],
+            "department_ids": department_ids or [BUSINESS_DEPARTMENT_ID],
+            "groups": groups or [],
+            "clearance_level": clearance_level,
             "max_cost_units": max_cost_units,
         },
     )
@@ -59,6 +66,9 @@ def run_trade_task_loop(
         tenant_id=tenant_id,
         user_id=user_id,
         roles=roles,
+        department_ids=department_ids,
+        groups=groups,
+        clearance_level=clearance_level,
         max_cost_units=max_cost_units,
     )
     steps.append(
@@ -88,6 +98,9 @@ def run_trade_task_loop(
             tenant_id=tenant_id,
             user_id=user_id,
             roles=roles,
+            department_ids=department_ids,
+            groups=groups,
+            clearance_level=clearance_level,
             max_cost_units=max_cost_units,
         )
         if revision_result:
@@ -152,6 +165,9 @@ def _execute_trade_agent(
     tenant_id: str,
     user_id: str,
     roles: list[str] | None,
+    department_ids: list[str] | None,
+    groups: list[str] | None,
+    clearance_level: str,
     max_cost_units: int,
     tool_name: str | None = None,
 ) -> dict[str, Any]:
@@ -162,6 +178,9 @@ def _execute_trade_agent(
         tenant_id=tenant_id,
         user_id=user_id,
         roles=roles,
+        department_ids=department_ids,
+        groups=groups,
+        clearance_level=clearance_level,
         max_cost_units=max_cost_units,
         tool_name=tool_name,
     )
@@ -174,6 +193,9 @@ def _revise_trade_result(
     tenant_id: str,
     user_id: str,
     roles: list[str] | None,
+    department_ids: list[str] | None,
+    groups: list[str] | None,
+    clearance_level: str,
     max_cost_units: int,
 ) -> dict[str, Any]:
 
@@ -184,6 +206,9 @@ def _revise_trade_result(
             tenant_id=tenant_id,
             user_id=user_id,
             roles=roles,
+            department_ids=department_ids,
+            groups=groups,
+            clearance_level=clearance_level,
             max_cost_units=max_cost_units,
             tool_name=_select_tool_name(user_input),
         )

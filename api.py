@@ -24,7 +24,7 @@ import shutil
 from pathlib import Path
 from typing import Any, Generator
 
-from fastapi import FastAPI, File, HTTPException, Request, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -34,6 +34,7 @@ from config import ROUTE_KEYWORDS
 from graph.production_graph import run_production_multi_agent
 from ingestion.build_index import DEFAULT_MANIFEST_PATH, SUPPORTED_EXTENSIONS, build_index
 from loops.trade_task_loop import run_trade_task_loop
+from rag.access_control import BUSINESS_COLLECTION_NAME, BUSINESS_DEPARTMENT_ID, DEFAULT_TENANT_ID
 from rag.chroma_store import DEFAULT_CHROMA_DIR
 from rag.lexical_index import DEFAULT_LEXICAL_INDEX_PATH
 from tools.registry import list_tools
@@ -59,7 +60,7 @@ app.add_middleware(
 )
 
 UPLOAD_DIR = Path("outputs/uploads/business_docs")
-RAG_COLLECTION_NAME = "trade_business_docs_api"
+RAG_COLLECTION_NAME = BUSINESS_COLLECTION_NAME
 
 
 class ChatRequest(BaseModel):
@@ -70,12 +71,15 @@ class ChatRequest(BaseModel):
 
 
     user_input: str = Field(..., min_length=1, description="用户输入的问题或任务")
-    tenant_id: str = Field(default="tenant_demo", description="租户 ID")
+    tenant_id: str = Field(default=DEFAULT_TENANT_ID, description="租户 ID")
     user_id: str = Field(default="user_demo", description="用户 ID")
     roles: list[str] = Field(
         default_factory=lambda: ["operator", "analyst"],
         description="用户角色，用于权限校验",
     )
+    department_ids: list[str] = Field(default_factory=lambda: [BUSINESS_DEPARTMENT_ID])
+    groups: list[str] = Field(default_factory=list)
+    clearance_level: str = Field(default="internal")
     max_cost_units: int = Field(default=10, ge=0, description="最大成本预算")
 
 
@@ -213,7 +217,16 @@ def capabilities() -> dict:
 
 
 @app.post("/documents/upload")
-def upload_business_document(file: UploadFile = File(...)) -> dict:
+def upload_business_document(
+    file: UploadFile = File(...),
+    tenant_id: str = Form(DEFAULT_TENANT_ID),
+    user_id: str = Form("user_demo"),
+    visibility: str = Form("department"),
+    allowed_user_ids: str = Form(""),
+    allowed_roles: str = Form(""),
+    allowed_groups: str = Form(""),
+    sensitivity_level: str = Form("internal"),
+) -> dict:
 
 
     upload_path = _save_upload(file, UPLOAD_DIR, SUPPORTED_EXTENSIONS)
@@ -225,6 +238,14 @@ def upload_business_document(file: UploadFile = File(...)) -> dict:
             chroma_dir=DEFAULT_CHROMA_DIR,
             collection_name=RAG_COLLECTION_NAME,
             lexical_index=DEFAULT_LEXICAL_INDEX_PATH,
+            tenant_id=tenant_id,
+            department_id=BUSINESS_DEPARTMENT_ID,
+            owner_user_id=user_id,
+            visibility=visibility,
+            allowed_user_ids=allowed_user_ids,
+            allowed_roles=allowed_roles,
+            allowed_groups=allowed_groups,
+            sensitivity_level=sensitivity_level,
             chunk_size=800,
             overlap=120,
             tesseract_cmd=r"C:\Program Files\Tesseract-OCR\tesseract.exe",
@@ -237,6 +258,7 @@ def upload_business_document(file: UploadFile = File(...)) -> dict:
         "uploaded": True,
         "file_name": upload_path.name,
         "path": str(upload_path),
+        "collection_name": RAG_COLLECTION_NAME,
         "index_stats": stats,
     }
 
@@ -250,6 +272,9 @@ def chat(request: ChatRequest) -> ChatResponse:
         tenant_id=request.tenant_id,
         user_id=request.user_id,
         roles=request.roles,
+        department_ids=request.department_ids,
+        groups=request.groups,
+        clearance_level=request.clearance_level,
         max_cost_units=request.max_cost_units,
     )
 
@@ -277,6 +302,9 @@ def chat_stream(request: ChatRequest) -> StreamingResponse:
             tenant_id=request.tenant_id,
             user_id=request.user_id,
             roles=request.roles,
+            department_ids=request.department_ids,
+            groups=request.groups,
+            clearance_level=request.clearance_level,
             max_cost_units=request.max_cost_units,
         )
 
@@ -308,6 +336,9 @@ def trade_loop_chat(request: TradeLoopRequest) -> dict:
         tenant_id=request.tenant_id,
         user_id=request.user_id,
         roles=request.roles,
+        department_ids=request.department_ids,
+        groups=request.groups,
+        clearance_level=request.clearance_level,
         max_cost_units=request.max_cost_units,
     )
     return result.model_dump()

@@ -31,6 +31,7 @@ export type UploadDocumentResult = {
   uploaded: boolean;
   file_name: string;
   path: string;
+  collection_name?: string;
   index_stats?: Record<string, number>;
 };
 
@@ -38,10 +39,16 @@ export function runTradeChat(input: {
   user_input: string;
   tenant_id: string;
   user_id: string;
+  department_ids?: string[];
+  groups?: string[];
+  clearance_level?: string;
   max_cost_units: number;
 }) {
   return postJson<TradeChatResult>("/chat", {
     ...input,
+    department_ids: input.department_ids ?? ["business"],
+    groups: input.groups ?? [],
+    clearance_level: input.clearance_level ?? "internal",
     roles: ["operator", "analyst"]
   });
 }
@@ -49,6 +56,10 @@ export function runTradeChat(input: {
 export async function uploadTradeDocument(file: File) {
   const formData = new FormData();
   formData.append("file", file);
+  formData.append("tenant_id", "company_internal");
+  formData.append("user_id", "business_user");
+  formData.append("visibility", "department");
+  formData.append("sensitivity_level", "internal");
 
   const response = await fetch(`${API_BASE}/documents/upload`, {
     method: "POST",

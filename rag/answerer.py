@@ -15,6 +15,8 @@
 \
 
 
+from core.schemas import RequestContext
+from rag.access_control import filter_authorized_hits
 from rag.reranker import rerank_hits
 from rag.retriever import HybridSearchConfig, hybrid_search
 from rag.schemas import RagAnswer, SearchHit
@@ -109,6 +111,7 @@ def build_answer_text(query: str, hits: list[SearchHit], warnings: list[str]) ->
 
 def answer_with_rag(
     query: str,
+    access_context: RequestContext,
     top_k: int = 5,
     candidate_k: int = 20,
 ) -> RagAnswer:
@@ -124,7 +127,8 @@ def answer_with_rag(
 
 
     config = HybridSearchConfig(top_k=top_k, candidate_k=candidate_k)
-    candidates = hybrid_search(query=query, config=config)
+    candidates = hybrid_search(query=query, config=config, access_context=access_context)
+    candidates = filter_authorized_hits(candidates, access_context)
 
     reranked_hits, rerank_warnings = rerank_hits(
         query=query,

@@ -44,9 +44,12 @@ class ProductionState(TypedDict, total=False):
 
 def create_context(
     user_input: str,
-    tenant_id: str = "tenant_demo",
+    tenant_id: str = "company_internal",
     user_id: str = "user_demo",
     roles: list[str] | None = None,
+    department_ids: list[str] | None = None,
+    groups: list[str] | None = None,
+    clearance_level: str = "internal",
     max_cost_units: int = 10,
 ) -> RequestContext:
     return RequestContext(
@@ -54,6 +57,9 @@ def create_context(
         tenant_id=tenant_id,
         user_id=user_id,
         roles=roles or ["operator"],
+        department_ids=department_ids or ["business"],
+        groups=groups or [],
+        clearance_level=clearance_level,
         user_input=user_input,
         max_cost_units=max_cost_units,
     )
@@ -201,7 +207,7 @@ def route_by_task_type(state: ProductionState) -> str:
 
 def _run_agent(state: ProductionState, agent) -> ProductionState:
     context = RequestContext(**state["context"])
-    output = agent.run(context.user_input)
+    output = agent.run(context)
 
     cost_check = check_cost_budget(
         context=context,
@@ -269,9 +275,12 @@ def build_production_graph():
 
 def run_production_multi_agent(
     user_input: str,
-    tenant_id: str = "tenant_demo",
+    tenant_id: str = "company_internal",
     user_id: str = "user_demo",
     roles: list[str] | None = None,
+    department_ids: list[str] | None = None,
+    groups: list[str] | None = None,
+    clearance_level: str = "internal",
     max_cost_units: int = 10,
     tool_name: str | None = None,
     business_id: str | None = None,
@@ -281,6 +290,9 @@ def run_production_multi_agent(
         tenant_id=tenant_id,
         user_id=user_id,
         roles=roles,
+        department_ids=department_ids,
+        groups=groups,
+        clearance_level=clearance_level,
         max_cost_units=max_cost_units,
     )
 

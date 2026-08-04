@@ -19,6 +19,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 from config import DEFAULT_ROUTE, ROUTE_KEYWORDS
+from core.schemas import RequestContext
 from rag.answerer import answer_with_rag
 
 
@@ -78,7 +79,7 @@ class KnowledgeAgent:
 
     name = "KnowledgeAgent"
 
-    def run(self, user_input: str) -> AgentOutput:
+    def run(self, context: RequestContext) -> AgentOutput:
 \
 \
 \
@@ -92,7 +93,8 @@ class KnowledgeAgent:
 
 
         rag_answer = answer_with_rag(
-            query=user_input,
+            query=context.user_input,
+            access_context=context,
             top_k=5,
             candidate_k=20,
         )
@@ -118,7 +120,7 @@ class DataAgent:
 
     name = "DataAgent"
 
-    def run(self, user_input: str) -> AgentOutput:
+    def run(self, context: RequestContext) -> AgentOutput:
         return AgentOutput(
             agent_name=self.name,
             task_type="data",
@@ -142,7 +144,7 @@ class ToolAgent:
 
     name = "ToolAgent"
 
-    def run(self, user_input: str) -> AgentOutput:
+    def run(self, context: RequestContext) -> AgentOutput:
         return AgentOutput(
             agent_name=self.name,
             task_type="tool",
@@ -167,7 +169,7 @@ class ReportAgent:
 
     name = "ReportAgent"
 
-    def run(self, user_input: str) -> AgentOutput:
+    def run(self, context: RequestContext) -> AgentOutput:
         return AgentOutput(
             agent_name=self.name,
             task_type="report",

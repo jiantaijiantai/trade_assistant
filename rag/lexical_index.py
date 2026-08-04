@@ -19,6 +19,8 @@ import re
 from collections import Counter
 from pathlib import Path
 
+from core.schemas import RequestContext
+from rag.access_control import can_access_metadata
 from rag.schemas import DocumentChunk, MetadataValue, SearchHit
 
 
@@ -202,6 +204,7 @@ def search_lexical(
     query: str,
     top_k: int = 20,
     index_path: str = DEFAULT_LEXICAL_INDEX_PATH,
+    access_context: RequestContext | None = None,
 ) -> list[SearchHit]:
 \
 \
@@ -212,6 +215,15 @@ def search_lexical(
     records = load_lexical_records(index_path)
     if not records:
         return []
+
+    if access_context is not None:
+        records = {
+            chunk_id: record
+            for chunk_id, record in records.items()
+            if can_access_metadata(access_context, record.get("metadata", {}) or {})
+        }
+        if not records:
+            return []
 
     query_tokens = tokenize(query)
     if not query_tokens:
