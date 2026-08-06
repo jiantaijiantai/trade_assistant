@@ -1,4 +1,11 @@
 from core.observability import TraceRecorder, new_request_id
+from core.checkpoints import (
+    create_task_record,
+    load_task_record,
+    new_task_id,
+    save_replay_record,
+    save_task_checkpoint,
+)
 from core.policies import (
     build_idempotency_key,
     check_cost_budget,
@@ -16,6 +23,7 @@ from core.schemas import (
     ToolCallPlan,
     ToolSpec,
 )
+from core.task_state import TaskStatus
 
 __all__ = [
     "AgentOutput",
@@ -28,7 +36,13 @@ __all__ = [
     "ToolCallPlan",
     "ToolSpec",
     "TraceRecorder",
+    "TaskStatus",
     "new_request_id",
+    "new_task_id",
+    "create_task_record",
+    "load_task_record",
+    "save_task_checkpoint",
+    "save_replay_record",
     "build_idempotency_key",
     "check_cost_budget",
     "check_roles",

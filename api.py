@@ -31,7 +31,14 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from config import ROUTE_KEYWORDS
-from graph.production_graph import run_production_multi_agent
+from core import load_task_record
+from graph.production_graph import (
+    approve_persisted_task,
+    create_persisted_task,
+    replay_persisted_task,
+    resume_persisted_task,
+    run_production_multi_agent,
+)
 from ingestion.build_index import DEFAULT_MANIFEST_PATH, SUPPORTED_EXTENSIONS, build_index
 from loops.trade_task_loop import run_trade_task_loop
 from rag.access_control import BUSINESS_COLLECTION_NAME, BUSINESS_DEPARTMENT_ID, DEFAULT_TENANT_ID
@@ -99,6 +106,10 @@ class ChatResponse(BaseModel):
     task_type: str | None = None
     route_reason: str | None = None
     route_confidence: float | None = None
+    route_source: str | None = None
+    route_missing_fields: list[str] = Field(default_factory=list)
+    route_risk_flags: list[str] = Field(default_factory=list)
+    needs_clarification: bool = False
     current_cost_units: int | None = None
     final_answer: str
     evidence: list[str] = Field(default_factory=list)
@@ -117,6 +128,17 @@ class TradeLoopRequest(ChatRequest):
 
 
     goal: str = Field(default="完成内部业务 Agent 助手闭环", description="用户目标")
+
+
+class TaskCreateRequest(ChatRequest):
+    require_approval: bool = Field(default=True)
+    tool_name: str | None = None
+    business_id: str | None = None
+
+
+class TaskApprovalRequest(BaseModel):
+    approved_by: str = Field(default="user_demo")
+    reason: str = Field(default="")
 
 
 @app.exception_handler(RequestValidationError)
@@ -326,6 +348,65 @@ def chat_stream(request: ChatRequest) -> StreamingResponse:
     )
 
 
+@app.post("/tasks")
+def create_task(request: TaskCreateRequest) -> dict:
+    return create_persisted_task(
+        user_input=request.user_input,
+        tenant_id=request.tenant_id,
+        user_id=request.user_id,
+        roles=request.roles,
+        department_ids=request.department_ids,
+        groups=request.groups,
+        clearance_level=request.clearance_level,
+        max_cost_units=request.max_cost_units,
+        tool_name=request.tool_name,
+        business_id=request.business_id,
+        require_approval=request.require_approval,
+    )
+
+
+@app.get("/tasks/{task_id}")
+def get_task(task_id: str) -> dict:
+    try:
+        return load_task_record(task_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.post("/tasks/{task_id}/approve")
+def approve_task(task_id: str, request: TaskApprovalRequest) -> dict:
+    try:
+        return approve_persisted_task(
+            task_id=task_id,
+            approved_by=request.approved_by,
+            reason=request.reason,
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@app.post("/tasks/{task_id}/resume")
+def resume_task(task_id: str) -> dict:
+    try:
+        return resume_persisted_task(task_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@app.post("/tasks/{task_id}/replay")
+def replay_task(task_id: str) -> dict:
+    try:
+        return replay_persisted_task(task_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
 @app.post("/loop/chat")
 def trade_loop_chat(request: TradeLoopRequest) -> dict:
 
@@ -357,6 +438,10 @@ def _state_to_chat_response(state: dict[str, Any]) -> ChatResponse:
         task_type=state.get("task_type"),
         route_reason=state.get("route_reason"),
         route_confidence=state.get("route_confidence"),
+        route_source=state.get("route_source"),
+        route_missing_fields=state.get("route_missing_fields", []),
+        route_risk_flags=state.get("route_risk_flags", []),
+        needs_clarification=bool(state.get("needs_clarification", False)),
         current_cost_units=state.get("current_cost_units"),
         final_answer=state.get("final_answer", ""),
         evidence=agent_output.get("evidence", []),

@@ -1,97 +1,53 @@
-\
-\
-\
-\
-\
-\
-\
-\
-\
-\
-\
-\
-\
-\
-
-
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-from config import DEFAULT_ROUTE, ROUTE_KEYWORDS
+from config import DEFAULT_ROUTE
 from core.schemas import RequestContext
 from rag.answerer import answer_with_rag
+from routing import classify_with_heuristics, route_by_rules
+from routing.schemas import RouteDecision as RoutingRouteDecision
 
 
 TaskType = Literal["knowledge", "data", "tool", "report"]
 
 
-class RouteDecision(BaseModel):
-
-
-    task_type: TaskType = Field(description="被路由到的 Agent 类型")
-    reason: str = Field(description="为什么这样路由")
-
-
 class AgentOutput(BaseModel):
-
-
     agent_name: str
     task_type: TaskType
     answer: str
     evidence: list[str] = Field(default_factory=list)
     sources: list[dict[str, Any]] = Field(default_factory=list)
     next_steps: list[str] = Field(default_factory=list)
+    cost_units: int = 1
 
 
 class Supervisor:
-\
-\
-\
-\
-\
-\
-\
-\
-\
-\
-
-
-    def route(self, user_input: str) -> RouteDecision:
+    def route(self, user_input: str) -> RoutingRouteDecision:
         text = user_input.strip()
 
-        for task_type, keywords in ROUTE_KEYWORDS.items():
-            for keyword in keywords:
-                if keyword in text:
-                    return RouteDecision(
-                        task_type=task_type,
-                        reason=f"命中关键词：{keyword}",
-                    )
+        rule_decision = route_by_rules(text)
+        if rule_decision is not None:
+            return rule_decision
 
-        return RouteDecision(
+        classifier_decision = classify_with_heuristics(text)
+        if classifier_decision.confidence > 0:
+            return classifier_decision
+
+        return RoutingRouteDecision(
             task_type=DEFAULT_ROUTE,
-            reason="未命中明确关键词，默认进入知识问答 Agent",
+            confidence=0.4,
+            reason="No reliable route was found; clarification is required before execution.",
+            source="classifier",
+            missing_fields=["task_intent"],
+            needs_clarification=True,
         )
 
 
 class KnowledgeAgent:
-
-
     name = "KnowledgeAgent"
 
     def run(self, context: RequestContext) -> AgentOutput:
-\
-\
-\
-\
-\
-\
-\
-\
-\
-\
-
-
         rag_answer = answer_with_rag(
             query=context.user_input,
             access_context=context,
@@ -116,8 +72,6 @@ class KnowledgeAgent:
 
 
 class DataAgent:
-
-
     name = "DataAgent"
 
     def run(self, context: RequestContext) -> AgentOutput:
@@ -125,7 +79,7 @@ class DataAgent:
             agent_name=self.name,
             task_type="data",
             answer=(
-                "这是数据分析类任务。当前学习版会返回模拟分析结果；"
+                "这是数据分析类任务。当前学习版会返回模拟分析框架；"
                 "生产版应连接数据库、CSV、Excel 或 BI 接口进行真实统计。"
             ),
             evidence=[
@@ -140,8 +94,6 @@ class DataAgent:
 
 
 class ToolAgent:
-
-
     name = "ToolAgent"
 
     def run(self, context: RequestContext) -> AgentOutput:
@@ -150,7 +102,8 @@ class ToolAgent:
             task_type="tool",
             answer=(
                 "这是团队内部业务文字辅助任务。系统会根据业务员输入生成本地待办、"
-                "检查清单或文字草稿，帮助整理客户准入、合同、货转、结算单、开票申请等日常材料。"
+                "检查清单或文字草稿，帮助整理客户准入、合同、货转、结算单、"
+                "开票申请等日常材料。"
             ),
             evidence=[
                 "适合处理：客户准入资料核对、合同字段整理、货转字段核对、结算单字段整理、开票申请资料整理",
@@ -165,8 +118,6 @@ class ToolAgent:
 
 
 class ReportAgent:
-
-
     name = "ReportAgent"
 
     def run(self, context: RequestContext) -> AgentOutput:
@@ -190,13 +141,6 @@ class ReportAgent:
 
 
 def source_to_api_dict(source) -> dict[str, Any]:
-\
-\
-\
-\
-\
-
-
     return {
         "chunk_id": source.chunk_id,
         "file_name": source.file_name,

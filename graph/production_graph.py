@@ -1,31 +1,26 @@
-\
-\
-\
-\
-\
-\
-\
-\
-\
-\
-\
-\
-
-
-from typing import TypedDict
+from typing import Any, TypedDict
 
 from langgraph.graph import END, StateGraph
 
 from agents import DataAgent, KnowledgeAgent, ReportAgent, Supervisor, ToolAgent
 from core import (
     RequestContext,
+    TaskStatus,
     TraceRecorder,
     build_idempotency_key,
     check_cost_budget,
     check_tool_permission,
+    create_task_record,
+    load_task_record,
+    new_task_id,
     new_request_id,
+    save_replay_record,
+    save_task_checkpoint,
 )
 from tools import execute_tool, get_tool
+
+
+CLARIFICATION_CONFIDENCE_THRESHOLD = 0.6
 
 
 class ProductionState(TypedDict, total=False):
@@ -33,6 +28,10 @@ class ProductionState(TypedDict, total=False):
     task_type: str
     route_reason: str
     route_confidence: float
+    route_source: str
+    route_missing_fields: list[str]
+    route_risk_flags: list[str]
+    needs_clarification: bool
     current_cost_units: int
     agent_output: dict
     trace: dict
@@ -40,6 +39,12 @@ class ProductionState(TypedDict, total=False):
     error: str
     tool_name: str
     business_id: str
+    task_id: str
+    task_status: str
+    require_approval: bool
+    approval_status: str
+    approval_reason: str
+    approved_by: str
 
 
 def create_context(
@@ -70,21 +75,97 @@ def supervisor_node(state: ProductionState) -> ProductionState:
     trace = TraceRecorder(context)
 
     decision = Supervisor().route(context.user_input)
+    needs_clarification = (
+        decision.needs_clarification
+        or decision.confidence < CLARIFICATION_CONFIDENCE_THRESHOLD
+        or bool(decision.risk_flags)
+    )
 
     trace.record(
         "route_decision",
-        "Supervisor 完成路由",
+        "Supervisor completed routing",
         task_type=decision.task_type,
+        confidence=decision.confidence,
         reason=decision.reason,
+        source=decision.source,
+        missing_fields=decision.missing_fields,
+        risk_flags=decision.risk_flags,
+        needs_clarification=needs_clarification,
     )
 
     return {
         **state,
         "task_type": decision.task_type,
         "route_reason": decision.reason,
-        "route_confidence": 0.8,
+        "route_confidence": decision.confidence,
+        "route_source": decision.source,
+        "route_missing_fields": decision.missing_fields,
+        "route_risk_flags": decision.risk_flags,
+        "needs_clarification": needs_clarification,
+        "task_status": TaskStatus.ROUTED.value,
         "current_cost_units": 0,
         "trace": trace.to_dict(),
+    }
+
+
+def approval_node(state: ProductionState) -> ProductionState:
+    approval_status = state.get("approval_status", "pending")
+    if approval_status == "approved":
+        return {**state, "task_status": TaskStatus.RUNNING.value}
+
+    return {
+        **state,
+        "task_status": TaskStatus.WAITING_APPROVAL.value,
+        "agent_output": {
+            "agent_name": "ApprovalNode",
+            "task_type": "approval",
+            "answer": "任务已暂停，等待人工审批后继续执行。",
+            "evidence": [
+                f"task_id={state.get('task_id')}",
+                f"task_type={state.get('task_type')}",
+                f"route_confidence={state.get('route_confidence')}",
+            ],
+            "sources": [],
+            "next_steps": [
+                "调用审批接口通过任务",
+                "审批通过后调用恢复接口继续执行",
+            ],
+        },
+    }
+
+
+def clarification_node(state: ProductionState) -> ProductionState:
+    missing_fields = state.get("route_missing_fields", [])
+    risk_flags = state.get("route_risk_flags", [])
+
+    questions = []
+    if "task_intent" in missing_fields or "route_intent" in missing_fields:
+        questions.append("你希望我做知识问答、数据分析、生成业务文件，还是形成报告？")
+    if "business_object" in missing_fields:
+        questions.append("请补充具体合同、客户、结算单、货转或发票对象。")
+    if "possible_high_risk_write" in risk_flags:
+        questions.append("这个请求可能涉及高风险写操作，请确认是否只需要生成草稿或只读查询。")
+    if not questions:
+        questions.append("请补充任务目标和业务对象，我再继续路由执行。")
+
+    answer = "当前路由置信度不足，暂不执行 Agent 或工具。\n" + "\n".join(
+        f"- {question}" for question in questions
+    )
+
+    return {
+        **state,
+        "task_status": TaskStatus.WAITING_APPROVAL.value,
+        "agent_output": {
+            "agent_name": "ClarificationNode",
+            "task_type": "clarify",
+            "answer": answer,
+            "evidence": [
+                f"route_confidence={state.get('route_confidence')}",
+                f"route_source={state.get('route_source')}",
+            ],
+            "sources": [],
+            "next_steps": ["用户补充信息后重新提交请求"],
+        },
     }
 
 
@@ -158,16 +239,25 @@ def final_node(state: ProductionState) -> ProductionState:
 
     lines = [
         f"request_id：{state['context']['request_id']}",
+        f"task_id：{state.get('task_id') or '无'}",
+        f"任务状态：{state.get('task_status') or '无'}",
         f"tenant_id：{state['context']['tenant_id']}",
         f"user_id：{state['context']['user_id']}",
         f"路由结果：{state['task_type']}",
+        f"路由来源：{state.get('route_source')}",
+        f"路由置信度：{state.get('route_confidence')}",
         f"路由原因：{state['route_reason']}",
-        f"执行 Agent：{output['agent_name']}",
-        f"成本消耗：{state['current_cost_units']}/{state['context']['max_cost_units']}",
+        f"执行节点：{output['agent_name']}",
+        f"成本消耗：{state.get('current_cost_units', 0)}/{state['context']['max_cost_units']}",
         "",
         "回答：",
         output["answer"],
     ]
+
+    if state.get("route_missing_fields"):
+        lines.extend(["", f"待澄清字段：{', '.join(state['route_missing_fields'])}"])
+    if state.get("route_risk_flags"):
+        lines.extend(["", f"风险标记：{', '.join(state['route_risk_flags'])}"])
 
     if tool_plan:
         lines.extend(
@@ -190,9 +280,10 @@ def final_node(state: ProductionState) -> ProductionState:
             "生产控制点：",
             "- 已携带 request_id，便于追踪",
             "- 已携带 tenant_id / user_id，便于内部隔离",
-            "- 已执行角色权限检查",
-            "- 已执行成本预算检查",
-            "- 已生成幂等 key，避免重复请求反复生成文件",
+            "- 已记录真实路由置信度，不再使用固定 0.8",
+            "- 低置信度或高风险信号会进入澄清节点",
+            "- 工具执行前仍执行角色权限和成本预算检查",
+            "- 工具执行使用幂等 key，避免重复请求反复生成文件",
         ]
     )
 
@@ -202,10 +293,28 @@ def final_node(state: ProductionState) -> ProductionState:
 def route_by_task_type(state: ProductionState) -> str:
     if state.get("error"):
         return "final"
+    if state.get("needs_clarification"):
+        return "clarify"
+    if _requires_approval(state):
+        return "approval"
     return state["task_type"]
 
 
-def _run_agent(state: ProductionState, agent) -> ProductionState:
+def route_after_approval(state: ProductionState) -> str:
+    if state.get("approval_status") == "approved":
+        return state["task_type"]
+    return "final"
+
+
+def _requires_approval(state: ProductionState) -> bool:
+    if not state.get("require_approval"):
+        return False
+    if state.get("approval_status") == "approved":
+        return False
+    return state.get("task_type") in {"tool", "report"}
+
+
+def _run_agent(state: ProductionState, agent: Any) -> ProductionState:
     context = RequestContext(**state["context"])
     output = agent.run(context)
 
@@ -220,6 +329,7 @@ def _run_agent(state: ProductionState, agent) -> ProductionState:
 
     return {
         **state,
+        "task_status": TaskStatus.RUNNING.value,
         "current_cost_units": state.get("current_cost_units", 0) + getattr(output, "cost_units", 1),
         "agent_output": output.model_dump(),
     }
@@ -244,6 +354,8 @@ def build_production_graph():
     graph = StateGraph(ProductionState)
 
     graph.add_node("supervisor", supervisor_node)
+    graph.add_node("approval", approval_node)
+    graph.add_node("clarify", clarification_node)
     graph.add_node("knowledge", knowledge_node)
     graph.add_node("data", data_node)
     graph.add_node("tool", tool_node)
@@ -256,6 +368,8 @@ def build_production_graph():
         "supervisor",
         route_by_task_type,
         {
+            "clarify": "clarify",
+            "approval": "approval",
             "knowledge": "knowledge",
             "data": "data",
             "tool": "tool",
@@ -264,6 +378,19 @@ def build_production_graph():
         },
     )
 
+    graph.add_conditional_edges(
+        "approval",
+        route_after_approval,
+        {
+            "knowledge": "knowledge",
+            "data": "data",
+            "tool": "tool",
+            "report": "report",
+            "final": "final",
+        },
+    )
+
+    graph.add_edge("clarify", "final")
     graph.add_edge("knowledge", "final")
     graph.add_edge("data", "final")
     graph.add_edge("tool", "final")
@@ -284,6 +411,11 @@ def run_production_multi_agent(
     max_cost_units: int = 10,
     tool_name: str | None = None,
     business_id: str | None = None,
+    task_id: str | None = None,
+    require_approval: bool = False,
+    approval_status: str = "pending",
+    approval_reason: str = "",
+    approved_by: str = "",
 ) -> ProductionState:
     context = create_context(
         user_input=user_input,
@@ -298,6 +430,12 @@ def run_production_multi_agent(
 
     app = build_production_graph()
     initial_state: ProductionState = {"context": context.model_dump()}
+    initial_state["task_id"] = task_id or new_task_id(context.request_id)
+    initial_state["task_status"] = TaskStatus.CREATED.value
+    initial_state["require_approval"] = require_approval
+    initial_state["approval_status"] = approval_status
+    initial_state["approval_reason"] = approval_reason
+    initial_state["approved_by"] = approved_by
 
     if tool_name:
         initial_state["tool_name"] = tool_name
@@ -305,3 +443,122 @@ def run_production_multi_agent(
         initial_state["business_id"] = business_id
 
     return app.invoke(initial_state)
+
+
+def create_persisted_task(
+    user_input: str,
+    tenant_id: str = "company_internal",
+    user_id: str = "user_demo",
+    roles: list[str] | None = None,
+    department_ids: list[str] | None = None,
+    groups: list[str] | None = None,
+    clearance_level: str = "internal",
+    max_cost_units: int = 10,
+    tool_name: str | None = None,
+    business_id: str | None = None,
+    require_approval: bool = True,
+) -> dict[str, Any]:
+    context = create_context(
+        user_input=user_input,
+        tenant_id=tenant_id,
+        user_id=user_id,
+        roles=roles,
+        department_ids=department_ids,
+        groups=groups,
+        clearance_level=clearance_level,
+        max_cost_units=max_cost_units,
+    )
+    task_id = new_task_id(context.request_id)
+    initial_state: ProductionState = {
+        "context": context.model_dump(),
+        "task_id": task_id,
+        "task_status": TaskStatus.CREATED.value,
+        "require_approval": require_approval,
+        "approval_status": "pending",
+        "approval_reason": "",
+        "approved_by": "",
+    }
+    if tool_name:
+        initial_state["tool_name"] = tool_name
+    if business_id:
+        initial_state["business_id"] = business_id
+
+    create_task_record(
+        task_id=task_id,
+        initial_state=initial_state,
+        require_approval=require_approval,
+    )
+    state = build_production_graph().invoke(initial_state)
+    status = _status_from_state(state)
+    save_task_checkpoint(task_id=task_id, status=status, state=state)
+    return load_task_record(task_id)
+
+
+def approve_persisted_task(task_id: str, approved_by: str, reason: str = "") -> dict[str, Any]:
+    record = load_task_record(task_id)
+    state = record["latest_state"]
+    approval = {
+        "status": "approved",
+        "approved_by": approved_by,
+        "reason": reason,
+    }
+    state["approval_status"] = "approved"
+    state["approved_by"] = approved_by
+    state["approval_reason"] = reason
+    save_task_checkpoint(
+        task_id=task_id,
+        status=TaskStatus.RUNNING,
+        state=state,
+        approval=approval,
+    )
+    return load_task_record(task_id)
+
+
+def resume_persisted_task(task_id: str) -> dict[str, Any]:
+    record = load_task_record(task_id)
+    state = record["latest_state"]
+    if state.get("approval_status") != "approved" and state.get("task_status") == TaskStatus.WAITING_APPROVAL.value:
+        return record
+
+    resumed_state = build_production_graph().invoke(state)
+    status = _status_from_state(resumed_state)
+    save_task_checkpoint(task_id=task_id, status=status, state=resumed_state)
+    return load_task_record(task_id)
+
+
+def replay_persisted_task(task_id: str) -> dict[str, Any]:
+    record = load_task_record(task_id)
+    initial_state = record["initial_state"]
+    source_context = initial_state["context"]
+    replay_context = {
+        **source_context,
+        "request_id": new_request_id(),
+    }
+    replay_task_id = new_task_id(replay_context["request_id"])
+    replay_initial_state = {
+        **initial_state,
+        "context": replay_context,
+        "task_id": replay_task_id,
+        "task_status": TaskStatus.CREATED.value,
+        "approval_status": "pending",
+        "approval_reason": "",
+        "approved_by": "",
+    }
+    save_replay_record(
+        source_task_id=task_id,
+        replay_task_id=replay_task_id,
+        initial_state=replay_initial_state,
+        require_approval=bool(record.get("require_approval", True)),
+    )
+    replay_state = build_production_graph().invoke(replay_initial_state)
+    status = _status_from_state(replay_state)
+    save_task_checkpoint(task_id=replay_task_id, status=status, state=replay_state)
+    return load_task_record(replay_task_id)
+
+
+def _status_from_state(state: ProductionState) -> TaskStatus:
+    if state.get("error"):
+        return TaskStatus.FAILED
+    if state.get("task_status") == TaskStatus.WAITING_APPROVAL.value:
+        return TaskStatus.WAITING_APPROVAL
+    return TaskStatus.SUCCEEDED
