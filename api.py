@@ -31,7 +31,8 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from config import ROUTE_KEYWORDS
-from core import IdentityFallback, identity_kwargs, load_task_record, resolve_principal
+from core import IdentityFallback, current_capability_policy, identity_kwargs, is_tool_enabled, load_task_record, resolve_principal
+from data_sources import list_readonly_sources, search_readonly_sources
 from graph.production_graph import (
     approve_persisted_task,
     create_persisted_task,
@@ -272,9 +273,12 @@ def capabilities() -> dict:
                 "risk_level": tool.risk_level.value,
                 "required_roles": tool.required_roles,
                 "idempotent": tool.idempotent,
+                "enabled": is_tool_enabled(tool)[0],
+                "enablement_reason": is_tool_enabled(tool)[1],
             }
             for tool in list_tools()
         ],
+        "capability_policy": current_capability_policy(),
         "boundaries": [
             "只处理团队内部文字辅助任务",
             "不连接 ERP、OA、财务、审批或外部消息系统",
@@ -282,6 +286,16 @@ def capabilities() -> dict:
             "RAG 回答必须查看 sources 后再用于真实业务判断",
         ],
     }
+
+
+@app.get("/data-sources")
+def data_sources() -> dict:
+    return list_readonly_sources()
+
+
+@app.get("/data-sources/search")
+def data_sources_search(query: str = "", limit: int = 5) -> dict:
+    return search_readonly_sources(query=query, limit=limit)
 
 
 @app.post("/documents/upload")

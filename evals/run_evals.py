@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 from datetime import datetime
@@ -115,8 +116,23 @@ def run_tooling_eval(path: Path) -> dict[str, Any]:
     cases = _load_cases(path)
     results = []
     for case in cases:
-        if case["id"] == "tool_budget_blocks_execution":
-            state = run_production_multi_agent(case["input"], max_tool_calls=case["max_tool_calls"])
+        if case["id"] == "write_tools_disabled_by_default":
+            with _temporary_env("ALLOW_WRITE_TOOLS", "false"):
+                state = run_production_multi_agent(case["input"])
+            actual = {
+                "error": state.get("error"),
+                "tool_execution": (state.get("agent_output") or {}).get("tool_execution"),
+                "usage": state.get("usage", {}).get("summary", {}),
+            }
+            passed = (
+                case["expected_error_contains"] in str(actual["error"])
+                and actual["tool_execution"] == case["expected_tool_execution"]
+            )
+            results.append(_case_result(case["id"], passed, actual))
+        elif case["id"] == "tool_budget_blocks_execution_when_writes_enabled":
+            env_value = "true" if case.get("allow_write_tools") else "false"
+            with _temporary_env("ALLOW_WRITE_TOOLS", env_value):
+                state = run_production_multi_agent(case["input"], max_tool_calls=case["max_tool_calls"])
             actual = {
                 "error": state.get("error"),
                 "tool_execution": (state.get("agent_output") or {}).get("tool_execution"),
@@ -170,6 +186,23 @@ def _contains_all(actual: list[str], expected: list[str]) -> list[bool]:
 
 def _load_cases(path: Path) -> list[dict[str, Any]]:
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+class _temporary_env:
+    def __init__(self, name: str, value: str):
+        self.name = name
+        self.value = value
+        self.previous = None
+
+    def __enter__(self):
+        self.previous = os.environ.get(self.name)
+        os.environ[self.name] = self.value
+
+    def __exit__(self, exc_type, exc, tb):
+        if self.previous is None:
+            os.environ.pop(self.name, None)
+        else:
+            os.environ[self.name] = self.previous
 
 
 def _git_commit() -> str:

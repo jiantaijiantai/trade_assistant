@@ -1,8 +1,15 @@
 [
   {
-    "id": "tool_budget_blocks_execution",
+    "id": "write_tools_disabled_by_default",
+    "input": "帮我生成客户准入检查清单",
+    "expected_error_contains": "write tools are disabled",
+    "expected_tool_execution": null
+  },
+  {
+    "id": "tool_budget_blocks_execution_when_writes_enabled",
     "input": "帮我生成客户准入检查清单",
     "max_tool_calls": 0,
+    "allow_write_tools": true,
     "expected_error_contains": "tool_calls",
     "expected_tool_execution": null
   },

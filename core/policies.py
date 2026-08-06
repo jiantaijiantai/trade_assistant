@@ -12,6 +12,7 @@
 
 import hashlib
 
+from core.capabilities import is_tool_enabled
 from core.schemas import PolicyDecision, RequestContext, ToolSpec
 
 
@@ -65,4 +66,12 @@ def check_tool_permission(
     context: RequestContext,
     tool: ToolSpec,
 ) -> PolicyDecision:
-    return check_roles(context, tool.required_roles)
+    capability_allowed, capability_reason = is_tool_enabled(tool)
+    if not capability_allowed:
+        return PolicyDecision(allowed=False, reason=capability_reason)
+
+    role_check = check_roles(context, tool.required_roles)
+    if not role_check.allowed:
+        return role_check
+
+    return PolicyDecision(allowed=True, reason=capability_reason)
