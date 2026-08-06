@@ -1,6 +1,6 @@
 from core.auth import IdentityFallback, Principal, identity_kwargs, resolve_principal
 from core.capabilities import current_capability_policy, is_tool_enabled
-from core.observability import TraceRecorder, new_request_id
+from core.observability import TraceRecorder, new_request_id, write_runtime_log
 from core.checkpoints import (
     create_task_record,
     load_task_record,
@@ -46,6 +46,7 @@ __all__ = [
     "ToolCallPlan",
     "ToolSpec",
     "TraceRecorder",
+    "write_runtime_log",
     "Principal",
     "IdentityFallback",
     "resolve_principal",

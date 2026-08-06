@@ -31,7 +31,15 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from config import ROUTE_KEYWORDS
-from core import IdentityFallback, current_capability_policy, identity_kwargs, is_tool_enabled, load_task_record, resolve_principal
+from core import (
+    IdentityFallback,
+    current_capability_policy,
+    identity_kwargs,
+    is_tool_enabled,
+    load_task_record,
+    resolve_principal,
+    write_runtime_log,
+)
 from data_sources import list_readonly_sources, search_readonly_sources
 from graph.production_graph import (
     approve_persisted_task,
@@ -164,6 +172,11 @@ def _resolve_request_principal(http_request: Request, request: ChatRequest):
     try:
         return resolve_principal(http_request.headers, _fallback_from_request(request))
     except PermissionError as exc:
+        write_runtime_log(
+            "auth_denied",
+            "Request rejected because authenticated identity is missing",
+            data={"path": str(http_request.url.path)},
+        )
         raise HTTPException(status_code=401, detail=str(exc)) from exc
 
 
@@ -171,6 +184,11 @@ def _resolve_header_principal(http_request: Request):
     try:
         return resolve_principal(http_request.headers)
     except PermissionError as exc:
+        write_runtime_log(
+            "auth_denied",
+            "Request rejected because authenticated identity is missing",
+            data={"path": str(http_request.url.path)},
+        )
         raise HTTPException(status_code=401, detail=str(exc)) from exc
 
 
@@ -182,8 +200,22 @@ def _load_authorized_task_record(task_id: str, principal) -> dict:
 
     context = (record.get("latest_state") or record.get("initial_state") or {}).get("context", {})
     if context.get("tenant_id") != principal.tenant_id:
+        write_runtime_log(
+            "task_acl_denied",
+            "Task tenant access denied",
+            tenant_id=principal.tenant_id,
+            user_id=principal.user_id,
+            data={"task_id": task_id, "task_tenant_id": context.get("tenant_id")},
+        )
         raise HTTPException(status_code=403, detail="Task tenant access denied")
     if context.get("user_id") != principal.user_id and "admin" not in set(principal.roles):
+        write_runtime_log(
+            "task_acl_denied",
+            "Task owner access denied",
+            tenant_id=principal.tenant_id,
+            user_id=principal.user_id,
+            data={"task_id": task_id, "task_user_id": context.get("user_id")},
+        )
         raise HTTPException(status_code=403, detail="Task owner access denied")
     return record
 
@@ -366,6 +398,13 @@ def chat(request: ChatRequest, http_request: Request) -> ChatResponse:
 
 
     principal = _resolve_request_principal(http_request, request)
+    write_runtime_log(
+        "api_request",
+        "Chat request received",
+        tenant_id=principal.tenant_id,
+        user_id=principal.user_id,
+        data={"path": "/chat", "auth_source": principal.auth_source},
+    )
     state = run_production_multi_agent(
         user_input=request.user_input,
         **identity_kwargs(principal),
@@ -378,6 +417,18 @@ def chat(request: ChatRequest, http_request: Request) -> ChatResponse:
         max_estimated_cost=request.max_estimated_cost,
     )
 
+    write_runtime_log(
+        "api_response",
+        "Chat request completed",
+        request_id=state.get("context", {}).get("request_id"),
+        tenant_id=principal.tenant_id,
+        user_id=principal.user_id,
+        data={
+            "task_type": state.get("task_type"),
+            "error": state.get("error"),
+            "usage": state.get("usage", {}).get("summary", {}),
+        },
+    )
     return _state_to_chat_response(state)
 
 
@@ -393,6 +444,13 @@ def chat_stream(request: ChatRequest, http_request: Request) -> StreamingRespons
 \
 
     principal = _resolve_request_principal(http_request, request)
+    write_runtime_log(
+        "api_request",
+        "Streaming chat request received",
+        tenant_id=principal.tenant_id,
+        user_id=principal.user_id,
+        data={"path": "/chat/stream", "auth_source": principal.auth_source},
+    )
     def event_generator() -> Generator[str, None, None]:
         yield _sse_event("start", {"message": "请求已接收"})
         yield _sse_event("progress", {"message": "正在进入 Supervisor 路由"})
@@ -430,7 +488,14 @@ def chat_stream(request: ChatRequest, http_request: Request) -> StreamingRespons
 @app.post("/tasks")
 def create_task(request: TaskCreateRequest, http_request: Request) -> dict:
     principal = _resolve_request_principal(http_request, request)
-    return create_persisted_task(
+    write_runtime_log(
+        "api_request",
+        "Persisted task create request received",
+        tenant_id=principal.tenant_id,
+        user_id=principal.user_id,
+        data={"path": "/tasks", "require_approval": request.require_approval},
+    )
+    record = create_persisted_task(
         user_input=request.user_input,
         **identity_kwargs(principal),
         max_cost_units=request.max_cost_units,
@@ -444,6 +509,15 @@ def create_task(request: TaskCreateRequest, http_request: Request) -> dict:
         business_id=request.business_id,
         require_approval=request.require_approval,
     )
+    write_runtime_log(
+        "task_checkpoint",
+        "Persisted task create request completed",
+        request_id=record.get("latest_state", {}).get("context", {}).get("request_id"),
+        tenant_id=principal.tenant_id,
+        user_id=principal.user_id,
+        data={"task_id": record.get("task_id"), "status": record.get("status")},
+    )
+    return record
 
 
 @app.get("/tasks/{task_id}")
@@ -457,11 +531,19 @@ def approve_task(task_id: str, request: TaskApprovalRequest, http_request: Reque
     principal = _resolve_header_principal(http_request)
     _load_authorized_task_record(task_id, principal)
     try:
-        return approve_persisted_task(
+        record = approve_persisted_task(
             task_id=task_id,
             approved_by=principal.user_id,
             reason=request.reason,
         )
+        write_runtime_log(
+            "task_approved",
+            "Persisted task approved",
+            tenant_id=principal.tenant_id,
+            user_id=principal.user_id,
+            data={"task_id": task_id, "status": record.get("status")},
+        )
+        return record
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
@@ -473,7 +555,15 @@ def resume_task(task_id: str, http_request: Request) -> dict:
     principal = _resolve_header_principal(http_request)
     _load_authorized_task_record(task_id, principal)
     try:
-        return resume_persisted_task(task_id)
+        record = resume_persisted_task(task_id)
+        write_runtime_log(
+            "task_resumed",
+            "Persisted task resumed",
+            tenant_id=principal.tenant_id,
+            user_id=principal.user_id,
+            data={"task_id": task_id, "status": record.get("status")},
+        )
+        return record
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
@@ -485,7 +575,15 @@ def replay_task(task_id: str, http_request: Request) -> dict:
     principal = _resolve_header_principal(http_request)
     _load_authorized_task_record(task_id, principal)
     try:
-        return replay_persisted_task(task_id)
+        record = replay_persisted_task(task_id)
+        write_runtime_log(
+            "task_replayed",
+            "Persisted task replayed",
+            tenant_id=principal.tenant_id,
+            user_id=principal.user_id,
+            data={"source_task_id": task_id, "replay_task_id": record.get("task_id"), "status": record.get("status")},
+        )
+        return record
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
@@ -497,6 +595,13 @@ def trade_loop_chat(request: TradeLoopRequest, http_request: Request) -> dict:
 
 
     principal = _resolve_request_principal(http_request, request)
+    write_runtime_log(
+        "api_request",
+        "Loop chat request received",
+        tenant_id=principal.tenant_id,
+        user_id=principal.user_id,
+        data={"path": "/loop/chat", "goal": request.goal},
+    )
     result = run_trade_task_loop(
         goal=request.goal,
         user_input=request.user_input,

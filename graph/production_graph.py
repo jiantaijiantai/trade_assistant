@@ -22,6 +22,7 @@ from core import (
     save_replay_record,
     save_task_checkpoint,
     start_timer,
+    write_runtime_log,
 )
 from tools import execute_tool, get_tool
 
@@ -208,10 +209,30 @@ def tool_node(state: ProductionState) -> ProductionState:
 
     tool = get_tool(tool_name)
     if tool is None:
+        write_runtime_log(
+            "tool_missing",
+            "Requested tool is not registered",
+            request_id=context.request_id,
+            tenant_id=context.tenant_id,
+            user_id=context.user_id,
+            data={"tool_name": tool_name},
+        )
         return {**state, "error": f"工具不存在：{tool_name}"}
 
     permission = check_tool_permission(context, tool)
     if not permission.allowed:
+        write_runtime_log(
+            "tool_permission_denied",
+            "Tool execution denied by policy",
+            request_id=context.request_id,
+            tenant_id=context.tenant_id,
+            user_id=context.user_id,
+            data={
+                "tool_name": tool.name,
+                "risk_level": tool.risk_level.value,
+                "reason": permission.reason,
+            },
+        )
         return {**state, "error": permission.reason}
 
     idempotency_key = build_idempotency_key(
@@ -226,6 +247,18 @@ def tool_node(state: ProductionState) -> ProductionState:
 
     current_tool_calls = output_state.get("usage", {}).get("summary", {}).get("tool_calls", 0)
     if context.max_tool_calls is not None and current_tool_calls + 1 > context.max_tool_calls:
+        write_runtime_log(
+            "usage_budget_denied",
+            "Tool call budget exceeded before execution",
+            request_id=context.request_id,
+            tenant_id=context.tenant_id,
+            user_id=context.user_id,
+            data={
+                "tool_name": tool.name,
+                "tool_calls": current_tool_calls + 1,
+                "max_tool_calls": context.max_tool_calls,
+            },
+        )
         return {
             **output_state,
             "error": f"真实资源预算不足：tool_calls {current_tool_calls + 1}/{context.max_tool_calls}",
@@ -247,6 +280,18 @@ def tool_node(state: ProductionState) -> ProductionState:
     )
     usage_check = check_usage_budget(context, output_state["usage"])
     if not usage_check.allowed:
+        write_runtime_log(
+            "usage_budget_denied",
+            "Usage budget exceeded after tool execution",
+            request_id=context.request_id,
+            tenant_id=context.tenant_id,
+            user_id=context.user_id,
+            data={
+                "tool_name": tool.name,
+                "reason": usage_check.reason,
+                "usage": output_state["usage"].get("summary", {}),
+            },
+        )
         return {**output_state, "error": usage_check.reason}
 
     output_state["tool_name"] = tool.name
@@ -269,6 +314,19 @@ def tool_node(state: ProductionState) -> ProductionState:
 
 def final_node(state: ProductionState) -> ProductionState:
     if state.get("error"):
+        context = state.get("context", {})
+        write_runtime_log(
+            "graph_failed",
+            "Production graph finished with error",
+            request_id=context.get("request_id"),
+            tenant_id=context.get("tenant_id"),
+            user_id=context.get("user_id"),
+            data={
+                "task_id": state.get("task_id"),
+                "task_type": state.get("task_type"),
+                "error": state.get("error"),
+            },
+        )
         return {**state, "final_answer": f"请求失败：{state['error']}"}
 
     output = state["agent_output"]
@@ -341,6 +399,20 @@ def final_node(state: ProductionState) -> ProductionState:
         ]
     )
 
+    write_runtime_log(
+        "graph_completed",
+        "Production graph finished successfully",
+        request_id=state["context"].get("request_id"),
+        tenant_id=state["context"].get("tenant_id"),
+        user_id=state["context"].get("user_id"),
+        data={
+            "task_id": state.get("task_id"),
+            "task_type": state.get("task_type"),
+            "task_status": state.get("task_status"),
+            "usage": usage_summary,
+        },
+    )
+
     return {**state, "final_answer": "\n".join(lines)}
 
 
@@ -381,6 +453,20 @@ def _run_agent(state: ProductionState, agent: Any) -> ProductionState:
     )
 
     if not cost_check.allowed:
+        write_runtime_log(
+            "cost_budget_denied",
+            "Logical cost budget exceeded",
+            request_id=context.request_id,
+            tenant_id=context.tenant_id,
+            user_id=context.user_id,
+            data={
+                "agent": getattr(agent, "name", agent.__class__.__name__),
+                "reason": cost_check.reason,
+                "current_cost_units": state.get("current_cost_units", 0),
+                "next_cost_units": getattr(output, "cost_units", 1),
+                "max_cost_units": context.max_cost_units,
+            },
+        )
         return {**state, "error": cost_check.reason}
 
     usage = record_agent_usage(
@@ -393,6 +479,18 @@ def _run_agent(state: ProductionState, agent: Any) -> ProductionState:
     )
     usage_check = check_usage_budget(context, usage)
     if not usage_check.allowed:
+        write_runtime_log(
+            "usage_budget_denied",
+            "Usage budget exceeded after agent execution",
+            request_id=context.request_id,
+            tenant_id=context.tenant_id,
+            user_id=context.user_id,
+            data={
+                "agent": getattr(agent, "name", agent.__class__.__name__),
+                "reason": usage_check.reason,
+                "usage": usage.get("summary", {}),
+            },
+        )
         return {**state, "usage": usage, "error": usage_check.reason}
 
     return {
