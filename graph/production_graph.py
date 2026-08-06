@@ -10,12 +10,18 @@ from core import (
     build_idempotency_key,
     check_cost_budget,
     check_tool_permission,
+    check_usage_budget,
     create_task_record,
+    elapsed_ms,
     load_task_record,
     new_task_id,
     new_request_id,
+    new_usage_ledger,
+    record_agent_usage,
+    record_tool_usage,
     save_replay_record,
     save_task_checkpoint,
+    start_timer,
 )
 from tools import execute_tool, get_tool
 
@@ -33,6 +39,7 @@ class ProductionState(TypedDict, total=False):
     route_risk_flags: list[str]
     needs_clarification: bool
     current_cost_units: int
+    usage: dict
     agent_output: dict
     trace: dict
     final_answer: str
@@ -56,6 +63,12 @@ def create_context(
     groups: list[str] | None = None,
     clearance_level: str = "internal",
     max_cost_units: int = 10,
+    max_input_tokens: int | None = None,
+    max_output_tokens: int | None = None,
+    max_total_tokens: int | None = None,
+    max_tool_calls: int | None = None,
+    max_duration_ms: int | None = None,
+    max_estimated_cost: float | None = None,
 ) -> RequestContext:
     return RequestContext(
         request_id=new_request_id(),
@@ -67,6 +80,12 @@ def create_context(
         clearance_level=clearance_level,
         user_input=user_input,
         max_cost_units=max_cost_units,
+        max_input_tokens=max_input_tokens,
+        max_output_tokens=max_output_tokens,
+        max_total_tokens=max_total_tokens,
+        max_tool_calls=max_tool_calls,
+        max_duration_ms=max_duration_ms,
+        max_estimated_cost=max_estimated_cost,
     )
 
 
@@ -104,6 +123,7 @@ def supervisor_node(state: ProductionState) -> ProductionState:
         "needs_clarification": needs_clarification,
         "task_status": TaskStatus.ROUTED.value,
         "current_cost_units": 0,
+        "usage": state.get("usage") or new_usage_ledger(),
         "trace": trace.to_dict(),
     }
 
@@ -204,6 +224,14 @@ def tool_node(state: ProductionState) -> ProductionState:
     if output_state.get("error"):
         return output_state
 
+    current_tool_calls = output_state.get("usage", {}).get("summary", {}).get("tool_calls", 0)
+    if context.max_tool_calls is not None and current_tool_calls + 1 > context.max_tool_calls:
+        return {
+            **output_state,
+            "error": f"真实资源预算不足：tool_calls {current_tool_calls + 1}/{context.max_tool_calls}",
+        }
+
+    tool_started_at = start_timer()
     execution = execute_tool(
         context=context,
         tool=tool,
@@ -211,6 +239,15 @@ def tool_node(state: ProductionState) -> ProductionState:
         idempotency_key=idempotency_key,
         business_id=business_id,
     )
+    output_state["usage"] = record_tool_usage(
+        output_state.get("usage"),
+        tool_name=tool.name,
+        duration_ms=elapsed_ms(tool_started_at),
+        executed=bool(execution.get("executed", False)),
+    )
+    usage_check = check_usage_budget(context, output_state["usage"])
+    if not usage_check.allowed:
+        return {**output_state, "error": usage_check.reason}
 
     output_state["tool_name"] = tool.name
     output_state["business_id"] = business_id
@@ -254,6 +291,22 @@ def final_node(state: ProductionState) -> ProductionState:
         output["answer"],
     ]
 
+    usage_summary = state.get("usage", {}).get("summary", {})
+    if usage_summary:
+        lines.extend(
+            [
+                "",
+                "真实资源消耗：",
+                f"- input_tokens：{usage_summary.get('input_tokens', 0)}",
+                f"- output_tokens：{usage_summary.get('output_tokens', 0)}",
+                f"- total_tokens：{usage_summary.get('total_tokens', 0)}",
+                f"- estimated_cost：{usage_summary.get('estimated_cost', 0.0)}",
+                f"- tool_calls：{usage_summary.get('tool_calls', 0)}",
+                f"- agent_calls：{usage_summary.get('agent_calls', 0)}",
+                f"- duration_ms：{usage_summary.get('duration_ms', 0)}",
+            ]
+        )
+
     if state.get("route_missing_fields"):
         lines.extend(["", f"待澄清字段：{', '.join(state['route_missing_fields'])}"])
     if state.get("route_risk_flags"):
@@ -283,6 +336,7 @@ def final_node(state: ProductionState) -> ProductionState:
             "- 已记录真实路由置信度，不再使用固定 0.8",
             "- 低置信度或高风险信号会进入澄清节点",
             "- 工具执行前仍执行角色权限和成本预算检查",
+            "- 已记录 token、估算金额、工具调用次数和节点耗时",
             "- 工具执行使用幂等 key，避免重复请求反复生成文件",
         ]
     )
@@ -316,7 +370,9 @@ def _requires_approval(state: ProductionState) -> bool:
 
 def _run_agent(state: ProductionState, agent: Any) -> ProductionState:
     context = RequestContext(**state["context"])
+    started_at = start_timer()
     output = agent.run(context)
+    duration_ms = elapsed_ms(started_at)
 
     cost_check = check_cost_budget(
         context=context,
@@ -327,11 +383,24 @@ def _run_agent(state: ProductionState, agent: Any) -> ProductionState:
     if not cost_check.allowed:
         return {**state, "error": cost_check.reason}
 
+    usage = record_agent_usage(
+        state.get("usage"),
+        node_name=getattr(agent, "name", agent.__class__.__name__),
+        input_text=context.user_input,
+        output_text=output.answer,
+        duration_ms=duration_ms,
+        cost_units=getattr(output, "cost_units", 1),
+    )
+    usage_check = check_usage_budget(context, usage)
+    if not usage_check.allowed:
+        return {**state, "usage": usage, "error": usage_check.reason}
+
     return {
         **state,
         "task_status": TaskStatus.RUNNING.value,
         "current_cost_units": state.get("current_cost_units", 0) + getattr(output, "cost_units", 1),
         "agent_output": output.model_dump(),
+        "usage": usage,
     }
 
 
@@ -409,6 +478,12 @@ def run_production_multi_agent(
     groups: list[str] | None = None,
     clearance_level: str = "internal",
     max_cost_units: int = 10,
+    max_input_tokens: int | None = None,
+    max_output_tokens: int | None = None,
+    max_total_tokens: int | None = None,
+    max_tool_calls: int | None = None,
+    max_duration_ms: int | None = None,
+    max_estimated_cost: float | None = None,
     tool_name: str | None = None,
     business_id: str | None = None,
     task_id: str | None = None,
@@ -426,6 +501,12 @@ def run_production_multi_agent(
         groups=groups,
         clearance_level=clearance_level,
         max_cost_units=max_cost_units,
+        max_input_tokens=max_input_tokens,
+        max_output_tokens=max_output_tokens,
+        max_total_tokens=max_total_tokens,
+        max_tool_calls=max_tool_calls,
+        max_duration_ms=max_duration_ms,
+        max_estimated_cost=max_estimated_cost,
     )
 
     app = build_production_graph()
@@ -436,6 +517,7 @@ def run_production_multi_agent(
     initial_state["approval_status"] = approval_status
     initial_state["approval_reason"] = approval_reason
     initial_state["approved_by"] = approved_by
+    initial_state["usage"] = new_usage_ledger()
 
     if tool_name:
         initial_state["tool_name"] = tool_name
@@ -454,6 +536,12 @@ def create_persisted_task(
     groups: list[str] | None = None,
     clearance_level: str = "internal",
     max_cost_units: int = 10,
+    max_input_tokens: int | None = None,
+    max_output_tokens: int | None = None,
+    max_total_tokens: int | None = None,
+    max_tool_calls: int | None = None,
+    max_duration_ms: int | None = None,
+    max_estimated_cost: float | None = None,
     tool_name: str | None = None,
     business_id: str | None = None,
     require_approval: bool = True,
@@ -467,6 +555,12 @@ def create_persisted_task(
         groups=groups,
         clearance_level=clearance_level,
         max_cost_units=max_cost_units,
+        max_input_tokens=max_input_tokens,
+        max_output_tokens=max_output_tokens,
+        max_total_tokens=max_total_tokens,
+        max_tool_calls=max_tool_calls,
+        max_duration_ms=max_duration_ms,
+        max_estimated_cost=max_estimated_cost,
     )
     task_id = new_task_id(context.request_id)
     initial_state: ProductionState = {
@@ -477,6 +571,7 @@ def create_persisted_task(
         "approval_status": "pending",
         "approval_reason": "",
         "approved_by": "",
+        "usage": new_usage_ledger(),
     }
     if tool_name:
         initial_state["tool_name"] = tool_name
@@ -543,6 +638,7 @@ def replay_persisted_task(task_id: str) -> dict[str, Any]:
         "approval_status": "pending",
         "approval_reason": "",
         "approved_by": "",
+        "usage": new_usage_ledger(),
     }
     save_replay_record(
         source_task_id=task_id,

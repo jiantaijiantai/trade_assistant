@@ -87,6 +87,12 @@ class ChatRequest(BaseModel):
     department_ids: list[str] = Field(default_factory=lambda: [BUSINESS_DEPARTMENT_ID])
     groups: list[str] = Field(default_factory=list)
     clearance_level: str = Field(default="internal")
+    max_input_tokens: int | None = Field(default=None, ge=0)
+    max_output_tokens: int | None = Field(default=None, ge=0)
+    max_total_tokens: int | None = Field(default=None, ge=0)
+    max_tool_calls: int | None = Field(default=None, ge=0)
+    max_duration_ms: int | None = Field(default=None, ge=0)
+    max_estimated_cost: float | None = Field(default=None, ge=0)
     max_cost_units: int = Field(default=10, ge=0, description="最大成本预算")
 
 
@@ -111,6 +117,7 @@ class ChatResponse(BaseModel):
     route_risk_flags: list[str] = Field(default_factory=list)
     needs_clarification: bool = False
     current_cost_units: int | None = None
+    usage: dict[str, Any] = Field(default_factory=dict)
     final_answer: str
     evidence: list[str] = Field(default_factory=list)
     sources: list[dict[str, Any]] = Field(default_factory=list)
@@ -298,6 +305,12 @@ def chat(request: ChatRequest) -> ChatResponse:
         groups=request.groups,
         clearance_level=request.clearance_level,
         max_cost_units=request.max_cost_units,
+        max_input_tokens=request.max_input_tokens,
+        max_output_tokens=request.max_output_tokens,
+        max_total_tokens=request.max_total_tokens,
+        max_tool_calls=request.max_tool_calls,
+        max_duration_ms=request.max_duration_ms,
+        max_estimated_cost=request.max_estimated_cost,
     )
 
     return _state_to_chat_response(state)
@@ -328,6 +341,12 @@ def chat_stream(request: ChatRequest) -> StreamingResponse:
             groups=request.groups,
             clearance_level=request.clearance_level,
             max_cost_units=request.max_cost_units,
+            max_input_tokens=request.max_input_tokens,
+            max_output_tokens=request.max_output_tokens,
+            max_total_tokens=request.max_total_tokens,
+            max_tool_calls=request.max_tool_calls,
+            max_duration_ms=request.max_duration_ms,
+            max_estimated_cost=request.max_estimated_cost,
         )
 
         yield _sse_event(
@@ -359,6 +378,12 @@ def create_task(request: TaskCreateRequest) -> dict:
         groups=request.groups,
         clearance_level=request.clearance_level,
         max_cost_units=request.max_cost_units,
+        max_input_tokens=request.max_input_tokens,
+        max_output_tokens=request.max_output_tokens,
+        max_total_tokens=request.max_total_tokens,
+        max_tool_calls=request.max_tool_calls,
+        max_duration_ms=request.max_duration_ms,
+        max_estimated_cost=request.max_estimated_cost,
         tool_name=request.tool_name,
         business_id=request.business_id,
         require_approval=request.require_approval,
@@ -421,6 +446,12 @@ def trade_loop_chat(request: TradeLoopRequest) -> dict:
         groups=request.groups,
         clearance_level=request.clearance_level,
         max_cost_units=request.max_cost_units,
+        max_input_tokens=request.max_input_tokens,
+        max_output_tokens=request.max_output_tokens,
+        max_total_tokens=request.max_total_tokens,
+        max_tool_calls=request.max_tool_calls,
+        max_duration_ms=request.max_duration_ms,
+        max_estimated_cost=request.max_estimated_cost,
     )
     return result.model_dump()
 
@@ -443,6 +474,7 @@ def _state_to_chat_response(state: dict[str, Any]) -> ChatResponse:
         route_risk_flags=state.get("route_risk_flags", []),
         needs_clarification=bool(state.get("needs_clarification", False)),
         current_cost_units=state.get("current_cost_units"),
+        usage=state.get("usage", {}),
         final_answer=state.get("final_answer", ""),
         evidence=agent_output.get("evidence", []),
         sources=agent_output.get("sources", []),

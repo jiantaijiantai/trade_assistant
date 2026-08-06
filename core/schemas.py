@@ -41,6 +41,12 @@ class RequestContext(BaseModel):
     clearance_level: str = "internal"
     user_input: str
     max_cost_units: int = 10
+    max_input_tokens: int | None = None
+    max_output_tokens: int | None = None
+    max_total_tokens: int | None = None
+    max_tool_calls: int | None = None
+    max_duration_ms: int | None = None
+    max_estimated_cost: float | None = None
 
 
 class RouteDecision(BaseModel):

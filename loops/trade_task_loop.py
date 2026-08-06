@@ -29,6 +29,12 @@ def run_trade_task_loop(
     groups: list[str] | None = None,
     clearance_level: str = "internal",
     max_cost_units: int = 10,
+    max_input_tokens: int | None = None,
+    max_output_tokens: int | None = None,
+    max_total_tokens: int | None = None,
+    max_tool_calls: int | None = None,
+    max_duration_ms: int | None = None,
+    max_estimated_cost: float | None = None,
 ) -> TradeTaskLoopResult:
 
 
@@ -50,6 +56,12 @@ def run_trade_task_loop(
             "groups": groups or [],
             "clearance_level": clearance_level,
             "max_cost_units": max_cost_units,
+            "max_input_tokens": max_input_tokens,
+            "max_output_tokens": max_output_tokens,
+            "max_total_tokens": max_total_tokens,
+            "max_tool_calls": max_tool_calls,
+            "max_duration_ms": max_duration_ms,
+            "max_estimated_cost": max_estimated_cost,
         },
     )
     steps.append(
@@ -70,6 +82,12 @@ def run_trade_task_loop(
         groups=groups,
         clearance_level=clearance_level,
         max_cost_units=max_cost_units,
+        max_input_tokens=max_input_tokens,
+        max_output_tokens=max_output_tokens,
+        max_total_tokens=max_total_tokens,
+        max_tool_calls=max_tool_calls,
+        max_duration_ms=max_duration_ms,
+        max_estimated_cost=max_estimated_cost,
     )
     steps.append(
         LoopStep(
@@ -102,6 +120,12 @@ def run_trade_task_loop(
             groups=groups,
             clearance_level=clearance_level,
             max_cost_units=max_cost_units,
+            max_input_tokens=max_input_tokens,
+            max_output_tokens=max_output_tokens,
+            max_total_tokens=max_total_tokens,
+            max_tool_calls=max_tool_calls,
+            max_duration_ms=max_duration_ms,
+            max_estimated_cost=max_estimated_cost,
         )
         if revision_result:
             execution = revision_result
@@ -169,6 +193,12 @@ def _execute_trade_agent(
     groups: list[str] | None,
     clearance_level: str,
     max_cost_units: int,
+    max_input_tokens: int | None = None,
+    max_output_tokens: int | None = None,
+    max_total_tokens: int | None = None,
+    max_tool_calls: int | None = None,
+    max_duration_ms: int | None = None,
+    max_estimated_cost: float | None = None,
     tool_name: str | None = None,
 ) -> dict[str, Any]:
 
@@ -182,6 +212,12 @@ def _execute_trade_agent(
         groups=groups,
         clearance_level=clearance_level,
         max_cost_units=max_cost_units,
+        max_input_tokens=max_input_tokens,
+        max_output_tokens=max_output_tokens,
+        max_total_tokens=max_total_tokens,
+        max_tool_calls=max_tool_calls,
+        max_duration_ms=max_duration_ms,
+        max_estimated_cost=max_estimated_cost,
         tool_name=tool_name,
     )
     return _state_to_response_dict(state)
@@ -197,6 +233,12 @@ def _revise_trade_result(
     groups: list[str] | None,
     clearance_level: str,
     max_cost_units: int,
+    max_input_tokens: int | None = None,
+    max_output_tokens: int | None = None,
+    max_total_tokens: int | None = None,
+    max_tool_calls: int | None = None,
+    max_duration_ms: int | None = None,
+    max_estimated_cost: float | None = None,
 ) -> dict[str, Any]:
 
 
@@ -210,6 +252,12 @@ def _revise_trade_result(
             groups=groups,
             clearance_level=clearance_level,
             max_cost_units=max_cost_units,
+            max_input_tokens=max_input_tokens,
+            max_output_tokens=max_output_tokens,
+            max_total_tokens=max_total_tokens,
+            max_tool_calls=max_tool_calls,
+            max_duration_ms=max_duration_ms,
+            max_estimated_cost=max_estimated_cost,
             tool_name=_select_tool_name(user_input),
         )
 
@@ -229,6 +277,7 @@ def _state_to_response_dict(state: dict[str, Any]) -> dict[str, Any]:
         "route_reason": state.get("route_reason"),
         "route_confidence": state.get("route_confidence"),
         "current_cost_units": state.get("current_cost_units"),
+        "usage": state.get("usage", {}),
         "final_answer": state.get("final_answer", ""),
         "evidence": agent_output.get("evidence", []),
         "sources": agent_output.get("sources", []),
@@ -260,6 +309,7 @@ def _response_summary(response: dict[str, Any]) -> dict[str, Any]:
         "task_type": response.get("task_type"),
         "route_reason": response.get("route_reason"),
         "current_cost_units": response.get("current_cost_units"),
+        "usage_summary": (response.get("usage") or {}).get("summary", {}),
         "has_sources": bool(response.get("sources")),
         "has_tool_plan": bool(tool_plan),
         "tool_name": tool_plan.get("tool_name"),

@@ -24,6 +24,14 @@ from core.schemas import (
     ToolSpec,
 )
 from core.task_state import TaskStatus
+from core.usage import (
+    check_usage_budget,
+    elapsed_ms,
+    new_usage_ledger,
+    record_agent_usage,
+    record_tool_usage,
+    start_timer,
+)
 
 __all__ = [
     "AgentOutput",
@@ -43,6 +51,12 @@ __all__ = [
     "load_task_record",
     "save_task_checkpoint",
     "save_replay_record",
+    "new_usage_ledger",
+    "record_agent_usage",
+    "record_tool_usage",
+    "check_usage_budget",
+    "start_timer",
+    "elapsed_ms",
     "build_idempotency_key",
     "check_cost_budget",
     "check_roles",
