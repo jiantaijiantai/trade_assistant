@@ -1,8 +1,8 @@
 {
   "dataset_version": "v0.1",
   "runner_version": "v0.1",
-  "code_version": "8d4c481",
-  "created_at": "2026-08-06T11:51:36",
+  "code_version": "8eaa671",
+  "created_at": "2026-08-06T12:06:22",
   "suites": {
     "routing": {
       "total": 5,
@@ -181,12 +181,29 @@
       ]
     },
     "tooling": {
-      "total": 2,
-      "passed": 2,
+      "total": 3,
+      "passed": 3,
       "failed": 0,
       "cases": [
         {
-          "id": "tool_budget_blocks_execution",
+          "id": "write_tools_disabled_by_default",
+          "passed": true,
+          "actual": {
+            "error": "low risk write tools are disabled; enable ALLOW_WRITE_TOOLS=true after approval controls are ready",
+            "tool_execution": null,
+            "usage": {
+              "input_tokens": 0,
+              "output_tokens": 0,
+              "total_tokens": 0,
+              "estimated_cost": 0.0,
+              "tool_calls": 0,
+              "agent_calls": 0,
+              "duration_ms": 0
+            }
+          }
+        },
+        {
+          "id": "tool_budget_blocks_execution_when_writes_enabled",
           "passed": true,
           "actual": {
             "error": "真实资源预算不足：tool_calls 1/0",
@@ -214,8 +231,8 @@
     }
   },
   "summary": {
-    "total": 15,
-    "passed": 15,
+    "total": 16,
+    "passed": 16,
     "failed": 0
   }
 }
