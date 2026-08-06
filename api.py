@@ -31,7 +31,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from config import ROUTE_KEYWORDS
-from core import load_task_record
+from core import IdentityFallback, identity_kwargs, load_task_record, resolve_principal
 from graph.production_graph import (
     approve_persisted_task,
     create_persisted_task,
@@ -148,6 +148,45 @@ class TaskApprovalRequest(BaseModel):
     reason: str = Field(default="")
 
 
+def _fallback_from_request(request: ChatRequest) -> IdentityFallback:
+    return IdentityFallback(
+        tenant_id=request.tenant_id,
+        user_id=request.user_id,
+        roles=request.roles,
+        department_ids=request.department_ids,
+        groups=request.groups,
+        clearance_level=request.clearance_level,
+    )
+
+
+def _resolve_request_principal(http_request: Request, request: ChatRequest):
+    try:
+        return resolve_principal(http_request.headers, _fallback_from_request(request))
+    except PermissionError as exc:
+        raise HTTPException(status_code=401, detail=str(exc)) from exc
+
+
+def _resolve_header_principal(http_request: Request):
+    try:
+        return resolve_principal(http_request.headers)
+    except PermissionError as exc:
+        raise HTTPException(status_code=401, detail=str(exc)) from exc
+
+
+def _load_authorized_task_record(task_id: str, principal) -> dict:
+    try:
+        record = load_task_record(task_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    context = (record.get("latest_state") or record.get("initial_state") or {}).get("context", {})
+    if context.get("tenant_id") != principal.tenant_id:
+        raise HTTPException(status_code=403, detail="Task tenant access denied")
+    if context.get("user_id") != principal.user_id and "admin" not in set(principal.roles):
+        raise HTTPException(status_code=403, detail="Task owner access denied")
+    return record
+
+
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
 
@@ -247,6 +286,7 @@ def capabilities() -> dict:
 
 @app.post("/documents/upload")
 def upload_business_document(
+    http_request: Request,
     file: UploadFile = File(...),
     tenant_id: str = Form(DEFAULT_TENANT_ID),
     user_id: str = Form("user_demo"),
@@ -258,6 +298,21 @@ def upload_business_document(
 ) -> dict:
 
 
+    try:
+        principal = resolve_principal(
+            http_request.headers,
+            IdentityFallback(
+                tenant_id=tenant_id,
+                user_id=user_id,
+                roles=["operator", "analyst"],
+                department_ids=[BUSINESS_DEPARTMENT_ID],
+                groups=[],
+                clearance_level=sensitivity_level if sensitivity_level in {"internal", "confidential", "restricted"} else "internal",
+            ),
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=401, detail=str(exc)) from exc
+
     upload_path = _save_upload(file, UPLOAD_DIR, SUPPORTED_EXTENSIONS)
     stats = build_index(
         argparse.Namespace(
@@ -267,9 +322,9 @@ def upload_business_document(
             chroma_dir=DEFAULT_CHROMA_DIR,
             collection_name=RAG_COLLECTION_NAME,
             lexical_index=DEFAULT_LEXICAL_INDEX_PATH,
-            tenant_id=tenant_id,
+            tenant_id=principal.tenant_id,
             department_id=BUSINESS_DEPARTMENT_ID,
-            owner_user_id=user_id,
+            owner_user_id=principal.user_id,
             visibility=visibility,
             allowed_user_ids=allowed_user_ids,
             allowed_roles=allowed_roles,
@@ -293,17 +348,13 @@ def upload_business_document(
 
 
 @app.post("/chat", response_model=ChatResponse)
-def chat(request: ChatRequest) -> ChatResponse:
+def chat(request: ChatRequest, http_request: Request) -> ChatResponse:
 
 
+    principal = _resolve_request_principal(http_request, request)
     state = run_production_multi_agent(
         user_input=request.user_input,
-        tenant_id=request.tenant_id,
-        user_id=request.user_id,
-        roles=request.roles,
-        department_ids=request.department_ids,
-        groups=request.groups,
-        clearance_level=request.clearance_level,
+        **identity_kwargs(principal),
         max_cost_units=request.max_cost_units,
         max_input_tokens=request.max_input_tokens,
         max_output_tokens=request.max_output_tokens,
@@ -317,7 +368,7 @@ def chat(request: ChatRequest) -> ChatResponse:
 
 
 @app.post("/chat/stream")
-def chat_stream(request: ChatRequest) -> StreamingResponse:
+def chat_stream(request: ChatRequest, http_request: Request) -> StreamingResponse:
 \
 \
 \
@@ -327,19 +378,14 @@ def chat_stream(request: ChatRequest) -> StreamingResponse:
 \
 \
 
-
+    principal = _resolve_request_principal(http_request, request)
     def event_generator() -> Generator[str, None, None]:
         yield _sse_event("start", {"message": "请求已接收"})
         yield _sse_event("progress", {"message": "正在进入 Supervisor 路由"})
 
         state = run_production_multi_agent(
             user_input=request.user_input,
-            tenant_id=request.tenant_id,
-            user_id=request.user_id,
-            roles=request.roles,
-            department_ids=request.department_ids,
-            groups=request.groups,
-            clearance_level=request.clearance_level,
+            **identity_kwargs(principal),
             max_cost_units=request.max_cost_units,
             max_input_tokens=request.max_input_tokens,
             max_output_tokens=request.max_output_tokens,
@@ -368,15 +414,11 @@ def chat_stream(request: ChatRequest) -> StreamingResponse:
 
 
 @app.post("/tasks")
-def create_task(request: TaskCreateRequest) -> dict:
+def create_task(request: TaskCreateRequest, http_request: Request) -> dict:
+    principal = _resolve_request_principal(http_request, request)
     return create_persisted_task(
         user_input=request.user_input,
-        tenant_id=request.tenant_id,
-        user_id=request.user_id,
-        roles=request.roles,
-        department_ids=request.department_ids,
-        groups=request.groups,
-        clearance_level=request.clearance_level,
+        **identity_kwargs(principal),
         max_cost_units=request.max_cost_units,
         max_input_tokens=request.max_input_tokens,
         max_output_tokens=request.max_output_tokens,
@@ -391,19 +433,19 @@ def create_task(request: TaskCreateRequest) -> dict:
 
 
 @app.get("/tasks/{task_id}")
-def get_task(task_id: str) -> dict:
-    try:
-        return load_task_record(task_id)
-    except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+def get_task(task_id: str, http_request: Request) -> dict:
+    principal = _resolve_header_principal(http_request)
+    return _load_authorized_task_record(task_id, principal)
 
 
 @app.post("/tasks/{task_id}/approve")
-def approve_task(task_id: str, request: TaskApprovalRequest) -> dict:
+def approve_task(task_id: str, request: TaskApprovalRequest, http_request: Request) -> dict:
+    principal = _resolve_header_principal(http_request)
+    _load_authorized_task_record(task_id, principal)
     try:
         return approve_persisted_task(
             task_id=task_id,
-            approved_by=request.approved_by,
+            approved_by=principal.user_id,
             reason=request.reason,
         )
     except FileNotFoundError as exc:
@@ -413,7 +455,9 @@ def approve_task(task_id: str, request: TaskApprovalRequest) -> dict:
 
 
 @app.post("/tasks/{task_id}/resume")
-def resume_task(task_id: str) -> dict:
+def resume_task(task_id: str, http_request: Request) -> dict:
+    principal = _resolve_header_principal(http_request)
+    _load_authorized_task_record(task_id, principal)
     try:
         return resume_persisted_task(task_id)
     except FileNotFoundError as exc:
@@ -423,7 +467,9 @@ def resume_task(task_id: str) -> dict:
 
 
 @app.post("/tasks/{task_id}/replay")
-def replay_task(task_id: str) -> dict:
+def replay_task(task_id: str, http_request: Request) -> dict:
+    principal = _resolve_header_principal(http_request)
+    _load_authorized_task_record(task_id, principal)
     try:
         return replay_persisted_task(task_id)
     except FileNotFoundError as exc:
@@ -433,18 +479,14 @@ def replay_task(task_id: str) -> dict:
 
 
 @app.post("/loop/chat")
-def trade_loop_chat(request: TradeLoopRequest) -> dict:
+def trade_loop_chat(request: TradeLoopRequest, http_request: Request) -> dict:
 
 
+    principal = _resolve_request_principal(http_request, request)
     result = run_trade_task_loop(
         goal=request.goal,
         user_input=request.user_input,
-        tenant_id=request.tenant_id,
-        user_id=request.user_id,
-        roles=request.roles,
-        department_ids=request.department_ids,
-        groups=request.groups,
-        clearance_level=request.clearance_level,
+        **identity_kwargs(principal),
         max_cost_units=request.max_cost_units,
         max_input_tokens=request.max_input_tokens,
         max_output_tokens=request.max_output_tokens,

@@ -1,3 +1,4 @@
+from core.auth import IdentityFallback, Principal, identity_kwargs, resolve_principal
 from core.observability import TraceRecorder, new_request_id
 from core.checkpoints import (
     create_task_record,
@@ -44,6 +45,10 @@ __all__ = [
     "ToolCallPlan",
     "ToolSpec",
     "TraceRecorder",
+    "Principal",
+    "IdentityFallback",
+    "resolve_principal",
+    "identity_kwargs",
     "TaskStatus",
     "new_request_id",
     "new_task_id",
