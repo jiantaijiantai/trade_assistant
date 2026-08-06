@@ -55,6 +55,34 @@ CLASSIFIER_SIGNALS: dict[TaskType, list[str]] = {
 
 HIGH_RISK_WRITE_SIGNALS = ["付款", "打款", "合同生效", "正式提交", "审批通过", "开具发票", "变更客户"]
 MISSING_BUSINESS_OBJECT_SIGNALS = ["这个", "那个", "上述", "前面", "相关材料"]
+PROMPT_INJECTION_SIGNALS = ["忽略", "绕过", "无视", "不要检查权限", "其他租户", "泄露", "直接告诉我"]
+CONFLICT_SIGNALS = ["冲突", "不一致", "错误编号", "金额高的", "直接按"]
+
+
+def classify_security_risk(user_input: str) -> RouteDecision | None:
+    text = user_input.strip()
+    risk_flags: list[str] = []
+
+    if any(signal in text for signal in PROMPT_INJECTION_SIGNALS):
+        risk_flags.append("possible_prompt_injection")
+
+    if any(signal in text for signal in CONFLICT_SIGNALS):
+        risk_flags.append("conflicting_or_unverified_business_data")
+
+    if any(signal in text for signal in HIGH_RISK_WRITE_SIGNALS):
+        risk_flags.append("possible_high_risk_write")
+
+    if not risk_flags:
+        return None
+
+    return RouteDecision(
+        task_type="tool" if "possible_high_risk_write" in risk_flags else "knowledge",
+        confidence=0.5,
+        reason="检测到安全或业务风险信号，需要澄清和人工确认后再继续",
+        source="classifier",
+        risk_flags=risk_flags,
+        needs_clarification=True,
+    )
 
 
 def classify_with_heuristics(user_input: str) -> RouteDecision:

@@ -1,0 +1,109 @@
+[
+  {
+    "id": "acl_same_department_allowed",
+    "context": {
+      "request_id": "req_eval_acl_1",
+      "tenant_id": "tenant_a",
+      "user_id": "user_a",
+      "roles": ["operator"],
+      "department_ids": ["business"],
+      "groups": [],
+      "clearance_level": "internal",
+      "user_input": "查询流程",
+      "max_cost_units": 10
+    },
+    "metadata": {
+      "tenant_id": "tenant_a",
+      "department_id": "business",
+      "visibility": "department",
+      "sensitivity_level": "internal"
+    },
+    "expected_allowed": true
+  },
+  {
+    "id": "acl_cross_tenant_denied",
+    "context": {
+      "request_id": "req_eval_acl_2",
+      "tenant_id": "tenant_a",
+      "user_id": "user_a",
+      "roles": ["operator"],
+      "department_ids": ["business"],
+      "groups": [],
+      "clearance_level": "internal",
+      "user_input": "查询流程",
+      "max_cost_units": 10
+    },
+    "metadata": {
+      "tenant_id": "tenant_b",
+      "department_id": "business",
+      "visibility": "department",
+      "sensitivity_level": "internal"
+    },
+    "expected_allowed": false
+  },
+  {
+    "id": "acl_restricted_clearance_denied",
+    "context": {
+      "request_id": "req_eval_acl_3",
+      "tenant_id": "tenant_a",
+      "user_id": "user_a",
+      "roles": ["operator"],
+      "department_ids": ["business"],
+      "groups": [],
+      "clearance_level": "internal",
+      "user_input": "查询流程",
+      "max_cost_units": 10
+    },
+    "metadata": {
+      "tenant_id": "tenant_a",
+      "department_id": "business",
+      "visibility": "department",
+      "sensitivity_level": "restricted"
+    },
+    "expected_allowed": false
+  },
+  {
+    "id": "acl_role_visibility_allowed",
+    "context": {
+      "request_id": "req_eval_acl_4",
+      "tenant_id": "tenant_a",
+      "user_id": "user_a",
+      "roles": ["finance"],
+      "department_ids": ["business"],
+      "groups": [],
+      "clearance_level": "confidential",
+      "user_input": "查询流程",
+      "max_cost_units": 10
+    },
+    "metadata": {
+      "tenant_id": "tenant_a",
+      "department_id": "business",
+      "visibility": "role",
+      "allowed_roles": "finance,admin",
+      "sensitivity_level": "confidential"
+    },
+    "expected_allowed": true
+  },
+  {
+    "id": "acl_user_visibility_denied",
+    "context": {
+      "request_id": "req_eval_acl_5",
+      "tenant_id": "tenant_a",
+      "user_id": "user_a",
+      "roles": ["operator"],
+      "department_ids": ["business"],
+      "groups": [],
+      "clearance_level": "internal",
+      "user_input": "查询流程",
+      "max_cost_units": 10
+    },
+    "metadata": {
+      "tenant_id": "tenant_a",
+      "department_id": "business",
+      "visibility": "users",
+      "allowed_user_ids": "user_b",
+      "sensitivity_level": "internal"
+    },
+    "expected_allowed": false
+  }
+]

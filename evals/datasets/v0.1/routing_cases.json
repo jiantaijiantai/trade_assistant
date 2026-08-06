@@ -1,0 +1,41 @@
+[
+  {
+    "id": "route_tool_checklist",
+    "input": "帮我生成客户准入检查清单",
+    "expected_task_type": "tool",
+    "expected_source": "rule",
+    "needs_clarification": false,
+    "min_confidence": 0.9
+  },
+  {
+    "id": "route_data_summary",
+    "input": "统计本月客户数量和发运吨数",
+    "expected_task_type": "data",
+    "expected_source": "rule",
+    "needs_clarification": false,
+    "min_confidence": 0.9
+  },
+  {
+    "id": "route_report_review",
+    "input": "写一份项目复盘报告",
+    "expected_task_type": "report",
+    "needs_clarification": false,
+    "min_confidence": 0.6
+  },
+  {
+    "id": "route_ambiguous",
+    "input": "这个怎么处理",
+    "expected_task_type": "knowledge",
+    "needs_clarification": true,
+    "expected_missing_fields": ["task_intent"],
+    "max_confidence": 0.6
+  },
+  {
+    "id": "route_high_risk_write",
+    "input": "请正式提交付款审批",
+    "expected_task_type": "tool",
+    "needs_clarification": true,
+    "expected_risk_flags": ["possible_high_risk_write"],
+    "max_confidence": 0.6
+  }
+]

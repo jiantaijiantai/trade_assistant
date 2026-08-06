@@ -1,0 +1,17 @@
+[
+  {
+    "id": "tool_budget_blocks_execution",
+    "input": "帮我生成客户准入检查清单",
+    "max_tool_calls": 0,
+    "expected_error_contains": "tool_calls",
+    "expected_tool_execution": null
+  },
+  {
+    "id": "idempotency_key_stable",
+    "tenant_id": "tenant_eval",
+    "user_id": "user_eval",
+    "action_type": "generate_business_checklist",
+    "business_id": "biz_eval_001",
+    "expected_same_key": true
+  }
+]

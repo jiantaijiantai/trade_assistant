@@ -6,6 +6,7 @@ from config import DEFAULT_ROUTE
 from core.schemas import RequestContext
 from rag.answerer import answer_with_rag
 from routing import classify_with_heuristics, route_by_rules
+from routing.classifier import classify_security_risk
 from routing.schemas import RouteDecision as RoutingRouteDecision
 
 
@@ -25,6 +26,10 @@ class AgentOutput(BaseModel):
 class Supervisor:
     def route(self, user_input: str) -> RoutingRouteDecision:
         text = user_input.strip()
+
+        security_decision = classify_security_risk(text)
+        if security_decision is not None:
+            return security_decision
 
         rule_decision = route_by_rules(text)
         if rule_decision is not None:
