@@ -1,0 +1,7 @@
+Phase 4 generated files
+
+outputs\reports\idem_redacted.md
+outputs\checklists\idem_redacted.md
+outputs\reports\idem_redacted.md
+outputs\reports\idem_redacted.md
+outputs\reports\idem_redacted.md

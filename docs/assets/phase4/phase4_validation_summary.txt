@@ -1,0 +1,8 @@
+阶段4验证摘要
+
+场景 | 路由 | 工具 | 生成文件 | 输出路径
+合同出具 | tool | draft_business_document | True | outputs\reports\idem_redacted.md
+客户准入 | tool | generate_business_checklist | True | outputs\checklists\idem_redacted.md
+货转出具 | tool | draft_business_document | True | outputs\reports\idem_redacted.md
+结算单出具 | tool | draft_business_document | True | outputs\reports\idem_redacted.md
+开票申请 | tool | draft_business_document | True | outputs\reports\idem_redacted.md

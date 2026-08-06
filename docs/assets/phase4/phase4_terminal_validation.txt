@@ -1,0 +1,145 @@
+========================================================================================
+SCENE: contract
+INPUT: 帮我完成合同出具
+request_id：req_redacted
+tenant_id：tenant_redacted
+user_id：user_redacted
+路由结果：tool
+路由原因：命中关键词：合同出具
+执行 Agent：ToolAgent
+成本消耗：1/10
+
+回答：
+这是团队内部业务文字辅助任务。系统会根据业务员输入生成本地待办、检查清单或文字草稿，帮助整理客户准入、合同、货转、结算单、开票申请等日常材料。
+
+工具执行结果：
+- 工具名称：draft_business_document
+- 工具说明：生成合同出具、货转出具、结算单出具、开票申请等内部文字草稿
+- 幂等 key：idem_redacted
+- 是否生成文件：True
+- 输出路径：outputs\reports\idem_redacted.md
+- 说明：已生成内部业务文字草稿
+- 边界：仅生成本地业务辅助文件，用于业务员整理、核对和交接日常文字材料。
+
+生产控制点：
+- 已携带 request_id，便于追踪
+- 已携带 tenant_id / user_id，便于内部隔离
+- 已执行角色权限检查
+- 已执行成本预算检查
+- 已生成幂等 key，避免重复请求反复生成文件
+========================================================================================
+SCENE: access
+INPUT: 新客户提供的准入材料是否符合要求
+request_id：req_redacted
+tenant_id：tenant_redacted
+user_id：user_redacted
+路由结果：tool
+路由原因：命中关键词：准入
+执行 Agent：ToolAgent
+成本消耗：1/10
+
+回答：
+这是团队内部业务文字辅助任务。系统会根据业务员输入生成本地待办、检查清单或文字草稿，帮助整理客户准入、合同、货转、结算单、开票申请等日常材料。
+
+工具执行结果：
+- 工具名称：generate_business_checklist
+- 工具说明：生成客户准入、合同、货转、结算单、开票申请检查清单
+- 幂等 key：idem_redacted
+- 是否生成文件：True
+- 输出路径：outputs\checklists\idem_redacted.md
+- 说明：已生成本地业务检查清单
+- 边界：仅生成本地业务辅助文件，用于业务员整理、核对和交接日常文字材料。
+
+生产控制点：
+- 已携带 request_id，便于追踪
+- 已携带 tenant_id / user_id，便于内部隔离
+- 已执行角色权限检查
+- 已执行成本预算检查
+- 已生成幂等 key，避免重复请求反复生成文件
+========================================================================================
+SCENE: transfer
+INPUT: 帮我完成货转出具
+request_id：req_redacted
+tenant_id：tenant_redacted
+user_id：user_redacted
+路由结果：tool
+路由原因：命中关键词：货转
+执行 Agent：ToolAgent
+成本消耗：1/10
+
+回答：
+这是团队内部业务文字辅助任务。系统会根据业务员输入生成本地待办、检查清单或文字草稿，帮助整理客户准入、合同、货转、结算单、开票申请等日常材料。
+
+工具执行结果：
+- 工具名称：draft_business_document
+- 工具说明：生成合同出具、货转出具、结算单出具、开票申请等内部文字草稿
+- 幂等 key：idem_redacted
+- 是否生成文件：True
+- 输出路径：outputs\reports\idem_redacted.md
+- 说明：已生成内部业务文字草稿
+- 边界：仅生成本地业务辅助文件，用于业务员整理、核对和交接日常文字材料。
+
+生产控制点：
+- 已携带 request_id，便于追踪
+- 已携带 tenant_id / user_id，便于内部隔离
+- 已执行角色权限检查
+- 已执行成本预算检查
+- 已生成幂等 key，避免重复请求反复生成文件
+========================================================================================
+SCENE: settlement
+INPUT: 帮我完成结算单出具
+request_id：req_redacted
+tenant_id：tenant_redacted
+user_id：user_redacted
+路由结果：tool
+路由原因：命中关键词：结算单
+执行 Agent：ToolAgent
+成本消耗：1/10
+
+回答：
+这是团队内部业务文字辅助任务。系统会根据业务员输入生成本地待办、检查清单或文字草稿，帮助整理客户准入、合同、货转、结算单、开票申请等日常材料。
+
+工具执行结果：
+- 工具名称：draft_business_document
+- 工具说明：生成合同出具、货转出具、结算单出具、开票申请等内部文字草稿
+- 幂等 key：idem_redacted
+- 是否生成文件：True
+- 输出路径：outputs\reports\idem_redacted.md
+- 说明：已生成内部业务文字草稿
+- 边界：仅生成本地业务辅助文件，用于业务员整理、核对和交接日常文字材料。
+
+生产控制点：
+- 已携带 request_id，便于追踪
+- 已携带 tenant_id / user_id，便于内部隔离
+- 已执行角色权限检查
+- 已执行成本预算检查
+- 已生成幂等 key，避免重复请求反复生成文件
+========================================================================================
+SCENE: invoice
+INPUT: 帮我完成开票申请
+request_id：req_redacted
+tenant_id：tenant_redacted
+user_id：user_redacted
+路由结果：tool
+路由原因：命中关键词：开票
+执行 Agent：ToolAgent
+成本消耗：1/10
+
+回答：
+这是团队内部业务文字辅助任务。系统会根据业务员输入生成本地待办、检查清单或文字草稿，帮助整理客户准入、合同、货转、结算单、开票申请等日常材料。
+
+工具执行结果：
+- 工具名称：draft_business_document
+- 工具说明：生成合同出具、货转出具、结算单出具、开票申请等内部文字草稿
+- 幂等 key：idem_redacted
+- 是否生成文件：True
+- 输出路径：outputs\reports\idem_redacted.md
+- 说明：已生成内部业务文字草稿
+- 边界：仅生成本地业务辅助文件，用于业务员整理、核对和交接日常文字材料。
+
+生产控制点：
+- 已携带 request_id，便于追踪
+- 已携带 tenant_id / user_id，便于内部隔离
+- 已执行角色权限检查
+- 已执行成本预算检查
+- 已生成幂等 key，避免重复请求反复生成文件
